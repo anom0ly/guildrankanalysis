@@ -24,6 +24,11 @@ class Tier:
     starts: datetime  # first Mythic reset (US), start of tier week 1
     ends: datetime | None
     bosses: tuple[Boss, ...]
+    expansion: str = ""
+    # Raider.IO pull counts fill gaps in the logs. They are unusable for some
+    # older raids (every boss shows 1 pull); set False there to count pulls
+    # from WCL only.
+    rio_pulls: bool = True
 
     def boss_by_encounter(self, encounter_id: int) -> Boss | None:
         for b in self.bosses:
@@ -46,6 +51,7 @@ TIERS: dict[str, Tier] = {
             wcl_zone_id=53,
             starts=_utc(2026, 8, 18, 15),
             ends=None,
+            expansion="Midnight",
             bosses=(
                 Boss("nekzali-the-soulcoiler", 3470, "Nek'zali the Soulcoiler"),
                 Boss("entombed-sentinels", 3445, "Entombed Sentinels"),
@@ -64,6 +70,7 @@ TIERS: dict[str, Tier] = {
             wcl_zone_id=46,
             starts=_utc(2026, 3, 17, 15),
             ends=_utc(2026, 8, 18, 15),
+            expansion="Midnight",
             bosses=(
                 Boss("imperator-averzian", 3176, "Imperator Averzian"),
                 Boss("vorasius", 3177, "Vorasius"),
@@ -76,9 +83,73 @@ TIERS: dict[str, Tier] = {
                 Boss("midnight-falls", 3183, "Midnight Falls"),
             ),
         ),
+        Tier(
+            key="manaforge-omega",
+            name="Manaforge Omega",
+            rio_raid="manaforge-omega",
+            wcl_zone_id=44,
+            starts=_utc(2025, 8, 12, 15),
+            ends=_utc(2026, 3, 2, 22),
+            expansion="The War Within",
+            bosses=(
+                Boss("plexus-sentinel", 3129, "Plexus Sentinel"),
+                Boss("loomithar", 3131, "Loom'ithar"),
+                Boss("soulbinder-naazindhri", 3130, "Soulbinder Naazindhri"),
+                Boss("forgeweaver-araz", 3132, "Forgeweaver Araz"),
+                Boss("the-soul-hunters", 3122, "The Soul Hunters"),
+                Boss("fractillus", 3133, "Fractillus"),
+                Boss("nexus-king-salhadaar", 3134, "Nexus-King Salhadaar"),
+                Boss("dimensius", 3135, "Dimensius, the All-Devouring"),
+            ),
+        ),
+        Tier(
+            key="liberation-of-undermine",
+            name="Liberation of Undermine",
+            rio_raid="liberation-of-undermine",
+            wcl_zone_id=42,
+            starts=_utc(2025, 3, 4, 15),
+            ends=_utc(2025, 8, 12, 15),
+            expansion="The War Within",
+            bosses=(
+                Boss("vexie-and-the-geargrinders", 3009, "Vexie and the Geargrinders"),
+                Boss("cauldron-of-carnage", 3010, "Cauldron of Carnage"),
+                Boss("rik-reverb", 3011, "Rik Reverb"),
+                Boss("stix-bunkjunker", 3012, "Stix Bunkjunker"),
+                Boss("sprocketmonger-lockenstock", 3013, "Sprocketmonger Lockenstock"),
+                Boss("onearmed-bandit", 3014, "One-Armed Bandit"),
+                Boss("mugzee-heads-of-security", 3015, "Mug'Zee, Heads of Security"),
+                Boss("chrome-king-gallywix", 3016, "Chrome King Gallywix"),
+            ),
+        ),
+        Tier(
+            key="nerubar-palace",
+            name="Nerub-ar Palace",
+            rio_raid="nerubar-palace",
+            wcl_zone_id=38,
+            starts=_utc(2024, 9, 10, 15),
+            ends=_utc(2025, 3, 4, 15),
+            expansion="The War Within",
+            bosses=(
+                Boss("ulgrax-the-devourer", 2902, "Ulgrax the Devourer"),
+                Boss("the-bloodbound-horror", 2917, "The Bloodbound Horror"),
+                Boss("sikran", 2898, "Sikran"),
+                Boss("rashanan", 2918, "Rasha'nan"),
+                Boss("broodtwister-ovinax", 2919, "Broodtwister Ovi'nax"),
+                Boss("nexus-princess-kyveza", 2920, "Nexus-Princess Ky'veza"),
+                Boss("the-silken-court", 2921, "The Silken Court"),
+                Boss("queen-ansurek", 2922, "Queen Ansurek"),
+            ),
+        ),
     )
 }
 CURRENT_TIER = "venomous-abyss"
+# Past tiers the daily job loads once, in this order, with its spare time.
+BACKFILL_TIERS = ("mn-tier-1", "manaforge-omega", "liberation-of-undermine", "nerubar-palace")
+# The backfill stops starting guilds at this UTC hour and doesn't start another
+# chunk after it, so it never blocks the next daily run at 10:00.
+BACKFILL_STOP_HOUR = 9
+# Fixed run id, so a backfill resumes across days until the tier is complete.
+BACKFILL_RUN_ID = "backfill"
 
 MAX_RANK = 5000  # world top 5000, plus each region's top 5000
 MYTHIC = 5

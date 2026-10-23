@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from guildpulls.aggregate import GuildRow, build_snapshot
+from guildpulls import config
 from guildpulls.collect import WCL_REGIONS
 from guildpulls.config import Tier
 from guildpulls.metrics import guild_results
@@ -15,7 +16,9 @@ from guildpulls.store import Store
 def load_guild_rows(store: Store, tier: Tier) -> list[GuildRow]:
     matches = store.matches()
     kills = store.rio_kills(tier.key)
-    rio_pulls = store.rio_pulls(tier.key)
+    # Raider.IO pull counts aren't trusted for every tier; without them pulls
+    # to kill come from the logs only.
+    rio_pulls = store.rio_pulls(tier.key) if tier.rio_pulls else {}
     pulls = store.pulls_by_guild(tier.key)
     encounter_ids = [b.wcl_encounter_id for b in tier.bosses]
     results_cache: dict[int, dict] = {}
@@ -71,18 +74,20 @@ def write_snapshot(store: Store, tier: Tier, out_dir: str | Path, now: datetime 
 
 def write_index(store: Store, tiers: list[Tier], out_dir: str | Path, run_tier: str,
                 now: datetime | None = None) -> Path:
-    """The file the dashboard reads first: which tiers have data, and the
-    progress of the latest run of `run_tier`."""
+    """The file the dashboard reads first: which tiers have data, how far each
+    past tier's backfill has got, and the progress of the latest run of `run_tier`."""
     now = now or datetime.now(timezone.utc)
     out = {"schema": 1, "generated_at": now.isoformat(), "tiers": [], "run": None}
     for tier in tiers:
         snap = store.latest_snapshot(tier.key)
         out["tiers"].append({
-            "key": tier.key, "name": tier.name, "starts": tier.starts.isoformat(),
+            "key": tier.key, "name": tier.name, "expansion": tier.expansion,
+            "starts": tier.starts.isoformat(), "ends": tier.ends.isoformat() if tier.ends else None,
             "current": tier.ends is None,
             "snapshot": f"{tier.key}/latest.json" if snap else None,
             "guilds": f"{tier.key}/guilds.json" if snap else None,
             "updated_at": snap["created_at"] if snap else None,
+            "backfill": backfill_progress(store, tier),
         })
     row = store.latest_run(run_tier)
     if row:
@@ -96,3 +101,16 @@ def write_index(store: Store, tiers: list[Tier], out_dir: str | Path, run_tier: 
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(out, indent=1, ensure_ascii=False))
     return path
+
+
+def backfill_progress(store: Store, tier: Tier) -> dict | None:
+    """Progress of a past tier's one-time load, or None when it isn't loading."""
+    if tier.key not in config.BACKFILL_TIERS:
+        return None
+    row = store.get_run(tier.key, config.BACKFILL_RUN_ID)
+    if row is None:
+        return {"state": "queued", "done": 0, "total": 0}
+    if row["completed_at"]:
+        return {"state": "complete", "done": len(store.guilds(tier.key)), "total": len(store.guilds(tier.key))}
+    counts = store.run_status_counts(tier.key, config.BACKFILL_RUN_ID)
+    return {"state": "loading", "done": sum(counts.values()), "total": len(store.guilds(tier.key))}
