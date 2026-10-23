@@ -174,6 +174,27 @@ select {
 .legend .lg[aria-pressed="false"] .dot { opacity: 0.25; }
 
 .block { display: flex; flex-direction: column; gap: 12px; }
+.card-groups { display: flex; flex-direction: column; gap: 20px; }
+.card-group { display: flex; flex-direction: column; gap: 10px; }
+.card-group .cards { grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); }
+.heat [data-boss] { cursor: pointer; }
+h3 { margin: 0; font-size: 13px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); }
+.picker { display: flex; flex-wrap: wrap; gap: 12px 20px; }
+.pgroup { display: flex; flex-direction: column; gap: 6px; }
+.pgroup .label { font-size: 12px; font-weight: 600; color: var(--muted); }
+.chip.small { height: 36px; padding: 0 12px; font-size: 13px; }
+.picker .chip[aria-pressed="false"] { border-style: solid; }
+.picker .chip[aria-pressed="true"] { background: var(--text); color: var(--surface); border-color: var(--text); }
+.chip:focus-visible, .lg:focus-visible { outline: 2px solid var(--link); outline-offset: 2px; }
+.heat th.tiercol, .heat td.tiercol { font-family: "JetBrains Mono", monospace; background: transparent; color: var(--text); white-space: nowrap; }
+.heat thead th.tiercol { font-family: Inter, system-ui, sans-serif; color: var(--muted); }
+.heat td.tiercol .mult { color: var(--muted); }
+.heat th.tiercol.first, .heat td.tiercol.first { border-left: 3px solid var(--border); border-radius: 0; }
+.stack { display: flex; height: 14px; background: var(--track); border-radius: 4px; overflow: hidden; }
+.stack div { height: 100%; }
+.dot.sq { border-radius: 2px; }
+.none { margin: 0; font-size: 14px; color: var(--muted); }
+#curve svg, #gear svg { width: 100%; height: auto; display: block; }
 h2 { margin: 0; font-size: 18px; font-weight: 600; }
 .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 16px; }
 .card { display: flex; flex-direction: column; gap: 14px; padding: 20px; background: var(--surface); border: 1px solid var(--border); border-radius: 12px; min-width: 0; }
@@ -228,5 +249,5 @@ h2 { margin: 0; font-size: 18px; font-weight: 600; }
   .field { flex: 1 1 140px; }
   select, #tier, #boss, #week { min-width: 0; width: 100%; }
   .panel, .heat-panel { flex-basis: 100%; padding: 16px; }
-  .cards { grid-template-columns: 1fr; }
+  .cards, .card-group .cards { grid-template-columns: 1fr; }
 }

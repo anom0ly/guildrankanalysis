@@ -1,7 +1,8 @@
 # Guild pull analytics
 
 Compares Mythic raid progression between higher and lower ranked guilds:
-pulls to kill, raid nights to kill, time on boss and item level on kill, as
+pulls to kill, raid nights to kill, time on boss, learning curve, wipe depth,
+raid schedule and item level (on the first pull and on the kill), as
 bracket medians for 1-200 (Hall of Fame, also split into 1-20 and 21-200) /
 201-400 / 401-600 / 601-1000 / 1001-1200 / 1201-1500 / 1501-2000 / 2001-3000 /
 3001-5000, under All, US and EU. The rules follow the metric spec
@@ -60,7 +61,15 @@ cp -r data/snapshots site/data && python -m http.server -d site 8000
 5. **Metrics** (`guildpulls/metrics.py`). Per guild: collapse duplicate logs
    (same boss, absolute start within 5 s), drop pulls under 10 s, stop at the
    first kill, then count pulls, nights (new night after a gap over 6 h), sum
-   combat time, and take the kill pull's average item level.
+   combat time, and take the kill pull's average item level. From the same
+   pulls: the learning curve (best share of the fight left so far, pulls to
+   the first sub-10% pull, close-out pulls, longest plateau without a 1-point
+   improvement), wipe depth (wipes by stage and by fight left), pulls per hour
+   on the boss, and item level on the first pull. Fight left is WCL's
+   `fightPercentage`, stored from 23 Oct 2026; older pulls estimate it from
+   `lastPhase` (which counts stages, not intermissions) and boss health. The
+   raid schedule is per guild across all bosses: nights and hours of
+   progression pulls per logged week.
 6. **Brackets** (`guildpulls/aggregate.py`). Pulls to kill comes from WCL when
    the logs have the kill, and from Raider.IO's own pull count when they
    don't (or when WCL is under 75% of Raider.IO's count, which means the logs
@@ -71,7 +80,12 @@ cp -r data/snapshots site/data && python -m http.server -d site 8000
    brackets and the 1-20 and 21-200 slices get a multiple of 1-200 (item level:
    a difference). Each cell
    also carries the counts behind it and the weekly kill share (from Raider.IO
-   first kill dates, so guilds without logs count too).
+   first kill dates, so guilds without logs count too), plus the bracket's
+   median learning curve and wipe mix for the latest week. Late wipes and
+   gained item level compare with 1-200 as a difference. Each bracket also
+   gets a tier summary of hours and nights per week, from guilds whose logs
+   cover at least 75% of the weeks their Raider.IO kills span. Stage names
+   come from one `report.phases` lookup per boss.
 
 ## Hosting: GitHub Actions and Pages
 

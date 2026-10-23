@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Guild Pull Analytics</title>
-<meta name="description" content="Mythic raid progression by guild rank: pulls, raid nights, time on boss and item level on kill.">
+<meta name="description" content="Mythic raid progression by guild rank: pulls, raid nights, time on boss, learning curve, wipe depth, raid schedule and item level.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500&display=swap">
@@ -52,19 +52,21 @@
 </form>
 
 <main id="content" hidden>
+  <section class="panel heat-panel">
+    <div class="panel-head">
+      <h2 id="heat-title">Median pulls to kill, every boss</h2>
+      <p>Pick a metric, then read down a column to compare brackets on one boss. Click a boss to see its detail below. <span id="heat-note"></span> 1-20 and 21-200 are slices of 1-200. Shading is relative within each boss: stronger shading means a higher value than the other brackets. A dash means fewer than 10 guilds in that bracket have a measured kill. The last two columns are the whole tier: median hours and nights raided per week while progressing, whatever metric is picked.</p>
+    </div>
+    <div class="picker" id="metric-picker" role="group" aria-label="Heatmap metric"></div>
+    <div class="scroll"><table class="heat" id="heat"></table></div>
+  </section>
+
   <section class="block">
     <h2 id="cards-title">Median per rank bracket</h2>
-    <div class="cards" id="cards"></div>
+    <div class="card-groups" id="cards"></div>
   </section>
 
   <div class="split">
-    <section class="panel heat-panel">
-      <div class="panel-head">
-        <h2>Median pulls to kill, every boss</h2>
-        <p>Read down a column to compare brackets on one boss. The small figure is the multiple of 1-200's pulls (the Hall of Fame guilds); 1-20 and 21-200 are slices of 1-200. Shading is relative within each boss, so stronger shading means more pulls than the other brackets needed. A dash means fewer than 10 guilds in that bracket have a measured kill.</p>
-      </div>
-      <div class="scroll"><table class="heat" id="heat"></table></div>
-    </section>
 
     <section class="panel">
       <div class="panel-head">
@@ -74,15 +76,46 @@
       <div id="chart"></div>
     </section>
 
+    <section class="panel">
+      <div class="panel-head">
+        <h2 id="curve-title">Learning curve</h2>
+        <p>The best pull so far, as the share of the fight still left, by pull number. Each line is the bracket median of guilds with the kill in public logs, and reaches 0 at the bracket's median kill. Uses the latest data, whatever week is picked.</p>
+      </div>
+      <div id="curve"></div>
+    </section>
+
+    <section class="panel">
+      <div class="panel-head">
+        <h2 id="wipes-title">Where wipes ended</h2>
+        <p>Progression wipes by the stage they ended in, averaged so each guild counts once. Bosses with one stage in the logs show how much of the fight was left instead. The figure on the right is the share in the last segment. Latest data.</p>
+      </div>
+      <div id="wipes"></div>
+    </section>
+
+    <section class="panel">
+      <div class="panel-head">
+        <h2 id="gear-title">Item level, first pull to kill</h2>
+        <p>Bracket median of the raid's average item level on its first pull of the boss and on the kill.</p>
+      </div>
+      <div id="gear"></div>
+    </section>
+
     <section class="panel defs">
       <h2>How these are measured</h2>
       <p><strong>Pulls to kill:</strong> every Mythic pull on the boss up to and including the first kill. Pulls under 10 seconds are resets and are ignored, and the same pull logged twice counts once. When the logs don't have the kill, or have under 75% of Raider.IO's count (missing nights), Raider.IO's pull count is used instead.</p>
       <p><strong>Raid nights to kill:</strong> raid nights with at least one pull on the boss, up to the kill. A new night starts after a gap of more than 6 hours. Logs only.</p>
       <p><strong>Time on boss:</strong> total combat time across those pulls. Logs only.</p>
       <p><strong>Item level on kill:</strong> the raid's average equipped item level on the kill pull, shown as a difference from 1-200. Logs only.</p>
+      <p><strong>Fight left:</strong> how much of the whole fight was left when a pull ended, from Warcraft Logs' fight percentage. Pulls loaded before 23 Oct 2026 estimate it from the stage reached and boss health, giving each stage an equal share, because boss health resets between stages on several bosses.</p>
+      <p><strong>Pulls to a sub-10% wipe and close-out pulls:</strong> the first pull that ended with under 10% of the fight left (or the kill, if that came first), and the pulls from there to the kill. Together they split slow learning from slow finishing.</p>
+      <p><strong>Longest plateau:</strong> the most pulls in a row that didn't beat the guild's best pull by at least 1 point of fight left.</p>
+      <p><strong>Late wipes:</strong> the share of progression wipes that ended in the stage the guild killed the boss in. On bosses that cycle back to stage one, or have no stages in the logs, it is wipes with 30% or less of the fight left. Shown as a difference in points from 1-200.</p>
+      <p><strong>Pulls per hour:</strong> pulls on the boss divided by raid time on it, counted from the first to the last pull of the boss on each night.</p>
+      <p><strong>Item level on first pull and gained:</strong> the raid's average item level on its first counted pull of the boss, and how much it rose by the kill.</p>
+      <p><strong>Hours and nights per week:</strong> raid nights with a progression pull on any boss (pulls up to each boss's first kill), from the first to the last pull of the night, averaged over the weeks with logs. A guild counts only when its logs cover at least 75% of the weeks between its first and last Raider.IO kill. Only Mythic boss pulls are logged, so trash and Heroic time is left out.</p>
       <p><strong>Brackets:</strong> Raider.IO Mythic world rank for the tier under All, and rank within the region under US or EU, each down to 5000. 1-200 is the Hall of Fame and the baseline for multiples; 1-20 and 21-200 split it. Brackets with no guilds in a region are hidden. Each figure is the bracket median and needs at least 10 guilds. Guilds with fewer than a quarter of the bracket median's pulls are left out as incomplete logs.</p>
       <p><strong>As of:</strong> the numbers as they stood at the end of that week of the tier. A kill's numbers never change, so a past week counts only the kills made by then. Ranks are today's.</p>
-      <p><strong>Sources:</strong> <a href="https://raider.io">Raider.IO</a> for ranks, kill dates and its pull counts; <a href="https://www.warcraftlogs.com">Warcraft Logs</a> for pulls, nights, time and item level.</p>
+      <p><strong>Sources:</strong> <a href="https://raider.io">Raider.IO</a> for ranks, kill dates and its pull counts; <a href="https://www.warcraftlogs.com">Warcraft Logs</a> for pulls, nights, time, fight progress, stages and item level.</p>
     </section>
   </div>
 
