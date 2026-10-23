@@ -155,6 +155,45 @@ def weekly_kill_share(members: list[GuildRow], boss, weeks: list[datetime]) -> l
     return [round(sum(1 for k in kill_times if k <= w) / len(members), 4) for w in weeks]
 
 
+def kill_time(g: GuildRow, boss) -> datetime | None:
+    """When the guild first killed the boss: Raider.IO's date, else the logged kill."""
+    rio = g.rio_first_defeated.get(boss.rio_slug)
+    if rio:
+        return datetime.fromisoformat(rio.replace("Z", "+00:00"))
+    r = g.results.get(boss.wcl_encounter_id)
+    if r is not None and r.killed and r.first_kill_ms is not None:
+        return datetime.fromtimestamp(r.first_kill_ms / 1000, timezone.utc)
+    return None
+
+
+def as_of(g: GuildRow, boss, week_end: datetime) -> GuildRow:
+    """The guild as it stood on one boss at the end of a week.
+
+    A kill's numbers never change once it happens, so a past week is the
+    current data with the kills that came later taken out.
+    """
+    k = kill_time(g, boss)
+    if k is not None and k <= week_end:
+        return g
+    return GuildRow(g.rio_guild_id, g.name, g.region, g.world_rank, g.region_rank, g.status,
+                    {}, {}, {})
+
+
+WEEKLY_KEYS = ("median", "vs_top", "n", "used", "killed", "guilds", "pulls_source")
+
+
+def weekly_cells(by_bracket: dict[str, list[GuildRow]], boss, weeks: list[datetime]) -> dict[str, list[dict]]:
+    """Each bracket's cell at the end of every tier week, cumulative."""
+    out: dict[str, list[dict]] = {label: [] for label in by_bracket}
+    for w in weeks:
+        cells = {label: boss_cell([as_of(g, boss, w) for g in members], boss)
+                 for label, members in by_bracket.items()}
+        add_comparisons(cells)
+        for label, cell in cells.items():
+            out[label].append({k: cell[k] for k in WEEKLY_KEYS})
+    return out
+
+
 def build_snapshot(tier: Tier, guilds: list[GuildRow], now: datetime | None = None) -> dict:
     now = now or datetime.now(timezone.utc)
     weeks = tier_weeks(tier, now)
@@ -169,15 +208,17 @@ def build_snapshot(tier: Tier, guilds: list[GuildRow], now: datetime | None = No
         for boss in tier.bosses:
             cells = {label: boss_cell(members, boss) for label, members in by_bracket.items()}
             add_comparisons(cells)
+            weekly = weekly_cells(by_bracket, boss, weeks)
             for label, members in by_bracket.items():
                 cells[label]["kill_share_weekly"] = weekly_kill_share(members, boss, weeks)
+                cells[label]["weekly"] = weekly[label]
             bosses[boss.rio_slug] = cells
         views[view] = {
             "bracket_sizes": {label: len(m) for label, m in by_bracket.items()},
             "bosses": bosses,
         }
     return {
-        "schema": 2,
+        "schema": 3,
         "tier": {"key": tier.key, "name": tier.name, "wcl_zone_id": tier.wcl_zone_id,
                  "starts": tier.starts.isoformat()},
         "generated_at": now.isoformat(),

@@ -6,7 +6,9 @@ bracket medians for Top 100 / 101-500 / 501-1000 / 1001-5000, under All, US
 and EU. The rules follow the metric spec
 (https://claude.ai/artifact/F8BfVJ7vtZjbpkbsnmZpX6).
 
-This repo holds the data pipeline. The dashboard reads its snapshot files.
+This repo holds the data pipeline, the dashboard (`site/`), and the GitHub
+Actions workflow that refreshes the data daily and publishes the dashboard to
+GitHub Pages.
 
 ## Running
 
@@ -16,6 +18,7 @@ export WCL_CLIENT_ID=...  WCL_CLIENT_SECRET=...   # Warcraft Logs API client
 
 python -m guildpulls run                 # daily refresh of the current tier
 python -m guildpulls run --limit 50      # first 50 guilds only
+python -m guildpulls run --max-minutes 270   # stop between guilds after 4.5 h
 python -m guildpulls status              # progress of today's run
 python -m guildpulls snapshot            # recompute medians from stored pulls
 python -m guildpulls --tier mn-tier-1 run   # backfill the previous tier
@@ -23,8 +26,17 @@ pytest
 ```
 
 Data goes to `data/guildpulls.sqlite`, snapshots to
-`data/snapshots/<tier>/<YYYY-MM-DD>.json` (plus `latest.json`, and a
-`-guilds.json` file with each guild's per-boss numbers for spot checks).
+`data/snapshots/<tier>/<YYYY-MM-DD>.json` (plus `latest.json`, and
+`guilds.json` with each guild's per-boss numbers for spot checks), and
+`data/snapshots/index.json` lists the tiers with data and the latest run's
+progress. A snapshot is only written once a run has reached every guild.
+
+To preview the dashboard locally, copy the snapshots into `site/data/` and
+serve the folder:
+
+```sh
+cp -r data/snapshots site/data && python -m http.server -d site 8000
+```
 
 ## How a run works
 
@@ -55,6 +67,41 @@ Data goes to `data/guildpulls.sqlite`, snapshots to
    brackets get a multiple of Top 100 (item level: a difference). Each cell
    also carries the counts behind it and the weekly kill share (from Raider.IO
    first kill dates, so guilds without logs count too).
+
+## Hosting: GitHub Actions and Pages
+
+`.github/workflows/refresh.yml` runs every day at 10:00 UTC, and on demand from
+Actions > Refresh data > Run workflow.
+
+- **State.** The SQLite database is kept between runs, gzipped, as an asset
+  on the `pipeline-state` release. Each run downloads it, runs the pipeline,
+  and uploads it again (also when the run fails, so progress is kept).
+- **Chunks.** A job may run for 6 hours and the first full load takes 6-14.
+  Each job stops starting new guilds after 4.5 hours (`CHUNK_MINUTES`),
+  saves the database, and if the run isn't finished starts the next chunk of
+  the same run id itself, up to `MAX_CHUNKS` (5). Daily runs after the first
+  load fit in one chunk.
+- **Data.** Snapshots and `index.json` are committed to the `data` branch
+  (bot commits stay off `main`).
+- **Site.** The deploy job publishes `site/` with the `data` branch's
+  snapshots under `site/data/`. Until the first load finishes, the page
+  shows its progress instead of numbers.
+- **Week filter.** A kill's numbers never change, so each snapshot carries
+  every bracket and boss cell as it stood at the end of each tier week
+  (`weekly`), computed from kill dates. The dashboard only reads `latest.json`.
+
+### One-time setup
+
+1. Make the repo public (Settings > General > Danger Zone > Change
+   visibility). On the free plan Pages needs a public repo, and public repos
+   have no Actions minutes cap.
+2. Settings > Secrets and variables > Actions > New repository secret:
+   `WCL_CLIENT_ID` and `WCL_CLIENT_SECRET`.
+3. Settings > Pages > Build and deployment > Source: **GitHub Actions**.
+4. Actions > Refresh data > Run workflow, to start the first load now instead
+   of at the next 10:00 UTC.
+
+The dashboard is then at `https://anom0ly.github.io/guildrankanalysis/`.
 
 ## WCL budget
 

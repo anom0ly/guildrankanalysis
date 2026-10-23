@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Guild Pull Analytics</title>
+<meta name="description" content="Mythic raid progression by guild rank: pulls, raid nights, time on boss and item level on kill.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500&display=swap">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="page">
+
+<header class="top">
+  <div class="titles">
+    <div class="eyebrow">Guild Pull Analytics · Mythic</div>
+    <h1>Progression by guild rank</h1>
+    <div class="sub" id="subtitle">Loading…</div>
+  </div>
+  <div class="pill" id="status-pill" hidden></div>
+</header>
+
+<div class="banner" id="banner" hidden></div>
+
+<form class="filters" id="filters" onsubmit="return false">
+  <div class="field">
+    <label for="region">Region</label>
+    <select id="region">
+      <option value="all">All</option>
+      <option value="us">US</option>
+      <option value="eu">EU</option>
+    </select>
+  </div>
+  <div class="field">
+    <label for="tier">Tier</label>
+    <select id="tier"></select>
+  </div>
+  <div class="field">
+    <label for="boss">Boss</label>
+    <select id="boss"></select>
+  </div>
+  <div class="field">
+    <label for="week">As of</label>
+    <select id="week"></select>
+  </div>
+  <div class="field">
+    <span class="label" id="brackets-label">Rank brackets</span>
+    <div class="chips" id="brackets" role="group" aria-labelledby="brackets-label"></div>
+  </div>
+</form>
+
+<main id="content" hidden>
+  <section class="block">
+    <h2 id="cards-title">Median per rank bracket</h2>
+    <div class="cards" id="cards"></div>
+  </section>
+
+  <div class="split">
+    <section class="panel heat-panel">
+      <div class="panel-head">
+        <h2>Median pulls to kill, every boss</h2>
+        <p>Read down a column to compare brackets on one boss. The small figure is the multiple of the top 100's pulls. Shading is relative within each boss, so stronger shading means more pulls than the other brackets needed. A dash means fewer than 10 guilds in that bracket have a measured kill.</p>
+      </div>
+      <div class="scroll"><table class="heat" id="heat"></table></div>
+    </section>
+
+    <section class="panel">
+      <div class="panel-head">
+        <h2 id="chart-title">Kills over the tier</h2>
+        <p>Share of guilds in each bracket with a kill, by week of the tier. Kill dates come from Raider.IO, so guilds without public logs count too.</p>
+      </div>
+      <div id="chart"></div>
+    </section>
+
+    <section class="panel defs">
+      <h2>How these are measured</h2>
+      <p><strong>Pulls to kill:</strong> every Mythic pull on the boss up to and including the first kill. Pulls under 10 seconds are resets and are ignored, and the same pull logged twice counts once. When the logs don't have the kill, or have under 75% of Raider.IO's count (missing nights), Raider.IO's pull count is used instead.</p>
+      <p><strong>Raid nights to kill:</strong> raid nights with at least one pull on the boss, up to the kill. A new night starts after a gap of more than 6 hours. Logs only.</p>
+      <p><strong>Time on boss:</strong> total combat time across those pulls. Logs only.</p>
+      <p><strong>Item level on kill:</strong> the raid's average equipped item level on the kill pull, shown as a difference from the top 100. Logs only.</p>
+      <p><strong>Brackets:</strong> Raider.IO Mythic world rank for the tier (region rank under US or EU), top 5000. Each figure is the bracket median and needs at least 10 guilds. Guilds with fewer than a quarter of the bracket median's pulls are left out as incomplete logs.</p>
+      <p><strong>As of:</strong> the numbers as they stood at the end of that week of the tier. A kill's numbers never change, so a past week counts only the kills made by then. Ranks are today's.</p>
+      <p><strong>Sources:</strong> <a href="https://raider.io">Raider.IO</a> for ranks, kill dates and its pull counts; <a href="https://www.warcraftlogs.com">Warcraft Logs</a> for pulls, nights, time and item level.</p>
+    </section>
+  </div>
+
+</main>
+
+<footer class="foot" id="foot"></footer>
+</div>
+<script src="app.js"></script>
+</body>
+</html>

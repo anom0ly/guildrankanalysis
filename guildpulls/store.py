@@ -76,6 +76,14 @@ CREATE TABLE IF NOT EXISTS progress (
     status TEXT NOT NULL,
     PRIMARY KEY (tier, rio_guild_id)
 );
+-- One row per run; completed_at is set once every guild has been reached.
+CREATE TABLE IF NOT EXISTS runs (
+    tier TEXT NOT NULL,
+    run_id TEXT NOT NULL,
+    started_at TEXT NOT NULL,
+    completed_at TEXT,
+    PRIMARY KEY (tier, run_id)
+);
 CREATE TABLE IF NOT EXISTS snapshots (
     tier TEXT NOT NULL,
     day TEXT NOT NULL,
@@ -202,6 +210,28 @@ class Store:
             (tier, run_id),
         )
         return {r[0]: r[1] for r in rows}
+
+    def start_run(self, tier: str, run_id: str, now_iso: str) -> None:
+        with self.db:
+            self.db.execute("INSERT OR IGNORE INTO runs VALUES (?,?,?,NULL)", (tier, run_id, now_iso))
+
+    def complete_run(self, tier: str, run_id: str, now_iso: str) -> None:
+        with self.db:
+            self.db.execute("UPDATE runs SET completed_at = ? WHERE tier = ? AND run_id = ?",
+                            (now_iso, tier, run_id))
+
+    def get_run(self, tier: str, run_id: str) -> sqlite3.Row | None:
+        return self.db.execute("SELECT * FROM runs WHERE tier = ? AND run_id = ?", (tier, run_id)).fetchone()
+
+    def latest_run(self, tier: str) -> sqlite3.Row | None:
+        return self.db.execute(
+            "SELECT * FROM runs WHERE tier = ? ORDER BY started_at DESC LIMIT 1", (tier,)
+        ).fetchone()
+
+    def latest_snapshot(self, tier: str) -> sqlite3.Row | None:
+        return self.db.execute(
+            "SELECT * FROM snapshots WHERE tier = ? ORDER BY day DESC LIMIT 1", (tier,)
+        ).fetchone()
 
     def record_snapshot(self, tier: str, day: str, path: str, now_iso: str) -> None:
         with self.db:

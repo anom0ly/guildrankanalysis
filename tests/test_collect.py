@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from guildpulls import config
 from guildpulls.collect import collect, report_window, reports_to_fetch
@@ -60,14 +60,45 @@ def test_collect_is_resumable_and_skips_other_bosses():
     store = Store(":memory:")
     seed(store)
     wcl = FakeWCL()
-    counts = collect(store, wcl, TIER, "run1", limit=2, now=NOW)
-    assert counts == {"ok": 1, "unmatched": 1}
-    counts = collect(store, wcl, TIER, "run1", now=NOW)
-    assert counts == {"ok": 2, "unmatched": 2}
+    assert collect(store, wcl, TIER, "run1", limit=2, now=NOW)
+    assert store.run_status_counts(TIER.key, "run1") == {"ok": 1, "unmatched": 1}
+    assert collect(store, wcl, TIER, "run1", now=NOW)
+    assert store.run_status_counts(TIER.key, "run1") == {"ok": 2, "unmatched": 2}
     assert wcl.lookups == 3  # CN guild never looked up; nothing looked up twice
     pulls = store.pulls_by_guild(TIER.key)
     assert all(p.encounter_id == 3470 for ps in pulls.values() for p in ps)
     assert sum(len(ps) for ps in pulls.values()) == 4
+
+
+def test_deadline_stops_between_guilds_and_run_resumes():
+    store = Store(":memory:")
+    seed(store)
+    wcl = FakeWCL()
+    ticks = iter([NOW, NOW + timedelta(minutes=5), NOW + timedelta(minutes=10)])
+    deadline = NOW + timedelta(minutes=8)
+    assert not collect(store, wcl, TIER, "run1", now=NOW, deadline=deadline, clock=lambda: next(ticks))
+    assert sum(store.run_status_counts(TIER.key, "run1").values()) == 2
+    assert collect(store, wcl, TIER, "run1", now=NOW, deadline=NOW + timedelta(hours=1), clock=lambda: NOW)
+    assert sum(store.run_status_counts(TIER.key, "run1").values()) == 4
+
+
+def test_index_reports_run_progress_and_snapshots(tmp_path):
+    import json
+    from guildpulls.snapshot import write_index, write_snapshot
+    store = Store(":memory:")
+    seed(store)
+    store.start_run(TIER.key, "run1", NOW.isoformat())
+    collect(store, FakeWCL(), TIER, "run1", limit=1, now=NOW)
+    idx = json.loads(write_index(store, list(config.TIERS.values()), tmp_path, TIER.key, NOW).read_text())
+    assert idx["run"] == {"tier": TIER.key, "run_id": "run1", "started_at": NOW.isoformat(),
+                          "completed_at": None, "complete": False, "done": 1, "total": 4}
+    assert idx["tiers"][0]["snapshot"] is None
+    store.complete_run(TIER.key, "run1", NOW.isoformat())
+    write_snapshot(store, TIER, tmp_path, NOW)
+    idx = json.loads(write_index(store, list(config.TIERS.values()), tmp_path, TIER.key, NOW).read_text())
+    assert idx["run"]["complete"]
+    assert idx["tiers"][0]["snapshot"] == f"{TIER.key}/latest.json"
+    assert (tmp_path / TIER.key / "guilds.json").exists()
 
 
 def test_raiderio_pulls_parsed_and_stored():

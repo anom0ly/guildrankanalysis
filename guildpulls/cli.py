@@ -2,6 +2,7 @@
 
     python -m guildpulls run                # daily refresh of the current tier
     python -m guildpulls run --limit 50     # first 50 guilds only (smoke test)
+    python -m guildpulls run --max-minutes 285   # stop cleanly in time for a CI job limit
     python -m guildpulls snapshot           # recompute medians from stored pulls
     python -m guildpulls status
 """
@@ -9,11 +10,11 @@ from __future__ import annotations
 
 import argparse
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from guildpulls import config
 from guildpulls.collect import collect, refresh_rankings
-from guildpulls.snapshot import write_snapshot
+from guildpulls.snapshot import write_index, write_snapshot
 from guildpulls.store import Store
 
 
@@ -29,6 +30,8 @@ def main(argv: list[str] | None = None) -> None:
     run.add_argument("--max-rank", type=int, default=config.MAX_RANK)
     run.add_argument("--limit", type=int, help="process at most this many guilds")
     run.add_argument("--run-id", help="resume this run (default: today's date, UTC)")
+    run.add_argument("--max-minutes", type=float,
+                     help="stop between guilds after this long; resume later with the same run id")
     run.add_argument("--skip-rankings", action="store_true", help="reuse the stored ranking list")
 
     sub.add_parser("snapshot", help="recompute medians from stored pulls")
@@ -51,13 +54,24 @@ def main(argv: list[str] | None = None) -> None:
         wcl = WCLClient()
         if not args.skip_rankings and not store.done_in_run(tier.key, run_id):
             refresh_rankings(store, tier, args.max_rank, now)
-        counts = collect(store, wcl, tier, run_id, args.max_rank, args.limit, now)
-        logging.info("run %s: %s; WCL points used: %.0f", run_id, counts, wcl.points_used)
-        path = write_snapshot(store, tier, args.out, now)
-        logging.info("snapshot written to %s", path)
+        store.start_run(tier.key, run_id, now.isoformat())
+        deadline = now + timedelta(minutes=args.max_minutes) if args.max_minutes else None
+        finished = collect(store, wcl, tier, run_id, args.max_rank, args.limit, now, deadline)
+        logging.info("run %s: %s; WCL points used: %.0f", run_id,
+                     store.run_status_counts(tier.key, run_id), wcl.points_used)
+        if finished:
+            store.complete_run(tier.key, run_id, datetime.now(timezone.utc).isoformat())
+            path = write_snapshot(store, tier, args.out, now)
+            logging.info("snapshot written to %s", path)
+        else:
+            logging.info("run %s not finished; no snapshot written", run_id)
+        write_index(store, list(config.TIERS.values()), args.out, tier.key)
     elif args.cmd == "snapshot":
         print(write_snapshot(store, tier, args.out, now))
+        write_index(store, list(config.TIERS.values()), args.out, tier.key)
     elif args.cmd == "status":
         total = len(store.guilds(tier.key))
         print(f"tier {tier.key}, run {run_id}: {store.run_status_counts(tier.key, run_id)} of {total} guilds")
+        row = store.get_run(tier.key, run_id)
+        print("complete" if row and row["completed_at"] else "not complete")
     store.close()
