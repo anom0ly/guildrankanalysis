@@ -8,7 +8,7 @@ from pathlib import Path
 from guildpulls.aggregate import GuildRow, build_snapshot
 from guildpulls.collect import WCL_REGIONS
 from guildpulls.config import Tier
-from guildpulls.metrics import guild_results
+from guildpulls.metrics import guild_results, guild_schedule
 from guildpulls.store import Store
 
 
@@ -18,7 +18,7 @@ def load_guild_rows(store: Store, tier: Tier) -> list[GuildRow]:
     rio_pulls = store.rio_pulls(tier.key)
     pulls = store.pulls_by_guild(tier.key)
     encounter_ids = [b.wcl_encounter_id for b in tier.bosses]
-    results_cache: dict[int, dict] = {}
+    results_cache: dict[int, tuple] = {}
     rows = []
     for g in store.guilds(tier.key):
         rid = g["rio_guild_id"]
@@ -26,13 +26,14 @@ def load_guild_rows(store: Store, tier: Tier) -> list[GuildRow]:
         if wcl_id is not None:
             status = "matched"
             if wcl_id not in results_cache:
-                results_cache[wcl_id] = guild_results(pulls.get(wcl_id, []), encounter_ids)
-            results = results_cache[wcl_id]
+                gp = pulls.get(wcl_id, [])
+                results_cache[wcl_id] = (guild_results(gp, encounter_ids), guild_schedule(gp, encounter_ids))
+            results, sched = results_cache[wcl_id]
         else:
             status = "pending" if rid not in matches and g["region"] in WCL_REGIONS else "unmatched"
-            results = {}
+            results, sched = {}, None
         rows.append(GuildRow(rid, g["name"], g["region"], g["world_rank"], g["region_rank"], status,
-                             results, kills.get(rid, {}), rio_pulls.get(rid, {})))
+                             results, kills.get(rid, {}), rio_pulls.get(rid, {}), sched))
     return rows
 
 
@@ -46,7 +47,9 @@ def guild_detail(tier: Tier, rows: list[GuildRow]) -> list[dict]:
             if r:
                 bosses[b.rio_slug] = {"killed": r.killed, "pulls": r.pulls, "nights": r.nights,
                                       "combat_hours": round(r.combat_hours, 3), "item_level": r.item_level,
-                                      "first_pull_is_kill": r.first_pull_is_kill}
+                                      "first_pull_is_kill": r.first_pull_is_kill,
+                                      "pulls_to_sub10": r.pulls_to_sub10, "longest_plateau": r.longest_plateau,
+                                      "first_pull_ilvl": r.first_pull_ilvl}
         out.append({"name": g.name, "region": g.region, "world_rank": g.world_rank,
                     "region_rank": g.region_rank, "status": g.status, "bosses": bosses,
                     "rio_pulls": g.rio_pulls})
@@ -56,7 +59,7 @@ def guild_detail(tier: Tier, rows: list[GuildRow]) -> list[dict]:
 def write_snapshot(store: Store, tier: Tier, out_dir: str | Path, now: datetime | None = None) -> Path:
     now = now or datetime.now(timezone.utc)
     rows = load_guild_rows(store, tier)
-    snap = build_snapshot(tier, rows, now)
+    snap = build_snapshot(tier, rows, now, store.phases())
     day = now.date().isoformat()
     d = Path(out_dir) / tier.key
     d.mkdir(parents=True, exist_ok=True)

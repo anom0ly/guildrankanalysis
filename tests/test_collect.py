@@ -44,6 +44,10 @@ class FakeWCL:
     def list_reports(self, gid, zone, start, end):
         return [ReportRef("R%d" % gid, 0, 1)]
 
+    def encounter_phases(self, code):
+        self.phase_lookups = getattr(self, "phase_lookups", 0) + 1
+        return {TIER.bosses[0].wcl_encounter_id: [{"id": 1, "name": "Stage One", "intermission": False}]}
+
     def report_pulls(self, refs):
         return {r.code: [pull(0, code=r.code), pull(600, kill=True, code=r.code, fid=1),
                          pull(0, boss=99999, code=r.code, fid=2)] for r in refs}
