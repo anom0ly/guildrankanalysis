@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 
 from guildpulls import config
-from guildpulls.aggregate import GuildRow, boss_cell, bracket_of, build_snapshot, tier_weeks, view_rank
+from guildpulls.aggregate import Entry, GuildRow, boss_cell, boss_entry, bracket_of, build_snapshot, tier_weeks, view_rank
 from guildpulls.metrics import BossResult
 
 TIER = config.TIERS["venomous-abyss"]
@@ -14,10 +14,12 @@ def result(pulls, nights=2, hours=1.0, ilvl=700.0, killed=True, first_pull_is_ki
                       ilvl if killed else None, 0 if killed else None, first_pull_is_kill)
 
 
-def guild(rank, r=None, region="us", region_rank=None, status="matched", killed_at="2026-09-01T00:00:00Z"):
+def guild(rank, r=None, region="us", region_rank=None, status="matched", killed_at="2026-09-01T00:00:00Z",
+          rio=None):
     return GuildRow(rank, f"g{rank}", region, rank, region_rank or rank, status,
                     {BOSS.wcl_encounter_id: r} if r else {},
-                    {BOSS.rio_slug: killed_at} if killed_at else {})
+                    {BOSS.rio_slug: killed_at} if killed_at else {},
+                    {BOSS.rio_slug: rio} if rio else {})
 
 
 def test_brackets():
@@ -95,3 +97,53 @@ def test_first_pull_kills_can_be_kept():
     cell = boss_cell(members, BOSS)
     assert cell["used"] == 11 and cell["incomplete"] == 0
     assert cell["median"]["pulls_to_kill"] == 1
+
+
+def test_wcl_used_when_logs_have_the_kill():
+    e = boss_entry(guild(1, result(100, nights=4, hours=6, ilvl=705), rio=110), BOSS, False)
+    assert e == Entry(100, "wcl", 4, 6.0, 705)
+
+
+def test_wcl_higher_than_rio_still_uses_wcl():
+    assert boss_entry(guild(1, result(400), rio=300), BOSS, False).source == "wcl"
+
+
+def test_rio_fills_when_logs_have_no_kill():
+    for g in (guild(1, None, rio=80),                          # matched, no logs
+              guild(2, result(50, killed=False), rio=80),      # logs stop before the kill
+              guild(3, None, status="unmatched", rio=80),      # not on WCL (e.g. CN)
+              guild(4, None, status="pending", rio=80)):
+        assert boss_entry(g, BOSS, False) == Entry(80, "rio_fill", None, None, None)
+
+
+def test_rio_replaces_wcl_under_75_percent():
+    # 74 < 0.75 * 100: logs missing nights; keep the kill's item level only
+    e = boss_entry(guild(1, result(74, nights=3, hours=4, ilvl=708), rio=100), BOSS, False)
+    assert e == Entry(100, "rio_corrected", None, None, 708)
+    # exactly 75%: WCL kept
+    assert boss_entry(guild(1, result(75), rio=100), BOSS, False).source == "wcl"
+
+
+def test_rio_correction_wins_over_first_pull_rule():
+    e = boss_entry(guild(1, result(1, first_pull_is_kill=True), rio=200), BOSS, True)
+    assert e.source == "rio_corrected"
+    assert boss_entry(guild(1, result(1, first_pull_is_kill=True)), BOSS, True) == "incomplete"
+
+
+def test_no_data_from_either_source():
+    assert boss_entry(guild(1, None), BOSS, False) == "no_pull_data"
+    assert boss_entry(guild(1, None, killed_at=None), BOSS, False) == "not_killed"
+
+
+def test_cell_mixes_sources_and_counts_samples_per_metric():
+    members = [guild(i, result(100, nights=5, hours=8, ilvl=700)) for i in range(1, 7)]   # 6 from logs
+    members += [guild(6 + i, None, status="unmatched", rio=120) for i in range(1, 4)]      # 3 filled
+    members += [guild(10, result(50, ilvl=702), rio=140)]                                  # 1 corrected
+    members += [guild(11, None, rio=2)]                                                    # odd value
+    c = boss_cell(members, BOSS)
+    assert c["pulls_source"] == {"wcl": 6, "rio_fill": 3, "rio_corrected": 1}
+    assert c["incomplete"] == 1  # 2 pulls is under a quarter of the median
+    assert c["n"] == {"pulls_to_kill": 10, "nights_to_kill": 6, "combat_hours": 6, "item_level": 7}
+    assert c["median"]["pulls_to_kill"] == 100
+    assert c["median"]["nights_to_kill"] is None  # only 6 guilds have nights
+    assert (c["unmatched"], c["kill_not_logged"], c["no_pull_data"]) == (3, 1, 0)

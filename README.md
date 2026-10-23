@@ -29,7 +29,8 @@ Data goes to `data/guildpulls.sqlite`, snapshots to
 ## How a run works
 
 1. **Ranks.** Raider.IO `raiding/raid-rankings` (Mythic, world) down to rank
-   5000: guild, realm, region, world rank, region rank, first kill date per boss.
+   5000: guild, realm, region, world rank, region rank, first kill date and
+   Raider.IO's pull count per boss.
 2. **Match.** Each guild is looked up on WCL with
    `guildData.guild(name, serverSlug, serverRegion)`. Matches are cached; a
    miss is retried after 7 days. CN guilds are skipped (no WCL API coverage).
@@ -44,9 +45,12 @@ Data goes to `data/guildpulls.sqlite`, snapshots to
    (same boss, absolute start within 5 s), drop pulls under 10 s, stop at the
    first kill, then count pulls, nights (new night after a gap over 6 h), sum
    combat time, and take the kill pull's average item level.
-6. **Brackets** (`guildpulls/aggregate.py`). Medians over guilds with a logged
-   kill, leaving out incomplete logs (pulls under a quarter of the bracket
-   median). One-shot kills count; the spec's "first logged pull was the kill"
+6. **Brackets** (`guildpulls/aggregate.py`). Pulls to kill comes from WCL when
+   the logs have the kill, and from Raider.IO's own pull count when they
+   don't (or when WCL is under 75% of Raider.IO's count, which means the logs
+   are missing nights; those guilds also drop out of nights and combat time).
+   Nights, combat time and item level are WCL only. Guilds under a quarter of
+   the bracket median are left out as incomplete. One-shot kills count; the spec's "first logged pull was the kill"
    rule is available as `EXCLUDE_FIRST_PULL_KILLS` but off. A median needs 10 guilds. Lower
    brackets get a multiple of Top 100 (item level: a difference). Each cell
    also carries the counts behind it and the weekly kill share (from Raider.IO
@@ -77,4 +81,8 @@ id. The zone ids come from `worldData.expansions { zones { id encounters } }`.
 - Region views use region rank among the world top 5000, so the US and EU
   1001-5000 brackets are only partly filled.
 - Guilds whose logs are private, or missing the kill, are counted in
-  `kill_not_logged` and left out of the medians.
+  `kill_not_logged`. Their pulls to kill can come from Raider.IO, but they are
+  left out of nights, combat time and item level. Each cell's `n` gives the
+  sample per metric and `pulls_source` how many pull counts came from where.
+- Raider.IO's counting method isn't documented; on the top 60 it matched WCL
+  within 10% for about two thirds of kills where both had a number.

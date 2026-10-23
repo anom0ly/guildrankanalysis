@@ -22,6 +22,7 @@ class GuildRow:
     status: str  # "matched", "unmatched" or "pending" (not looked up yet)
     results: dict[int, BossResult] = field(default_factory=dict)  # by WCL encounter id
     rio_first_defeated: dict[str, str] = field(default_factory=dict)  # by Raider.IO boss slug
+    rio_pulls: dict[str, int] = field(default_factory=dict)  # Raider.IO pulls to kill, by boss slug
 
 
 def bracket_of(rank: int | None) -> str | None:
@@ -40,52 +41,81 @@ def view_rank(g: GuildRow, view: str) -> int | None:
     return g.region_rank if g.region == view else None
 
 
-def _metric_values(r: BossResult) -> dict[str, float | None]:
-    return {
-        "pulls_to_kill": r.pulls,
-        "nights_to_kill": r.nights,
-        "combat_hours": r.combat_hours,
-        "item_level": r.item_level,
-    }
+@dataclass(frozen=True)
+class Entry:
+    """One guild's numbers on one boss, after choosing the pull count's source."""
+    pulls: int
+    source: str  # "wcl", "rio_fill" (no logged kill) or "rio_corrected" (logs missing nights)
+    nights: int | None
+    combat_hours: float | None
+    item_level: float | None
+
+    def value(self, metric: str) -> float | None:
+        return {"pulls_to_kill": self.pulls, "nights_to_kill": self.nights,
+                "combat_hours": self.combat_hours, "item_level": self.item_level}[metric]
+
+
+def boss_entry(g: GuildRow, boss, exclude_first_pull_kills: bool) -> Entry | str:
+    """Pick the guild's numbers for a boss, or say why it has none.
+
+    WCL is used when the logs have the kill. Raider.IO's pull count fills in
+    when they don't, and replaces the WCL count when WCL is under 75% of it
+    (the logs are missing nights, so nights and combat time are dropped too).
+    """
+    rio_n = g.rio_pulls.get(boss.rio_slug)
+    r = g.results.get(boss.wcl_encounter_id) if g.status == "matched" else None
+    if r is not None and r.killed:
+        if rio_n and r.pulls < config.RIO_UNDERCOUNT_FRACTION * rio_n:
+            return Entry(rio_n, "rio_corrected", None, None, r.item_level)
+        if r.first_pull_is_kill and exclude_first_pull_kills:
+            return "incomplete"
+        return Entry(r.pulls, "wcl", r.nights, r.combat_hours, r.item_level)
+    if rio_n:
+        return Entry(rio_n, "rio_fill", None, None, None)
+    return "no_pull_data" if boss.rio_slug in g.rio_first_defeated else "not_killed"
 
 
 def boss_cell(members: list[GuildRow], boss,
               exclude_first_pull_kills: bool | None = None) -> dict:
     """One bracket x boss cell: medians plus the counts the page shows."""
-    counts = {"guilds": len(members), "killed": 0, "unmatched": 0, "pending": 0,
-              "kill_not_logged": 0, "incomplete": 0, "used": 0}
     if exclude_first_pull_kills is None:
         exclude_first_pull_kills = config.EXCLUDE_FIRST_PULL_KILLS
-    candidates: list[BossResult] = []
+    counts = {"guilds": len(members), "killed": 0, "unmatched": 0, "pending": 0,
+              "kill_not_logged": 0, "no_pull_data": 0, "incomplete": 0, "used": 0}
+    entries: list[Entry] = []
     for g in members:
-        if boss.rio_slug in g.rio_first_defeated:
-            counts["killed"] += 1
+        killed = boss.rio_slug in g.rio_first_defeated
+        counts["killed"] += killed
+        # WCL coverage, shown whether or not Raider.IO fills the gap.
         if g.status != "matched":
             counts[g.status] += 1
-            continue
-        r = g.results.get(boss.wcl_encounter_id)
-        if r is None or not r.killed:
-            if boss.rio_slug in g.rio_first_defeated:
+        else:
+            r = g.results.get(boss.wcl_encounter_id)
+            if killed and (r is None or not r.killed):
                 counts["kill_not_logged"] += 1
-            continue
-        if r.first_pull_is_kill and exclude_first_pull_kills:
-            counts["incomplete"] += 1
-            continue
-        candidates.append(r)
+        e = boss_entry(g, boss, exclude_first_pull_kills)
+        if isinstance(e, Entry):
+            entries.append(e)
+        elif e != "not_killed":
+            counts[e] += 1
 
     # Missing nights: pull count under a quarter of the bracket's median.
-    if candidates:
-        floor = config.LOW_PULL_FRACTION * median(r.pulls for r in candidates)
-        kept = [r for r in candidates if r.pulls >= floor]
-        counts["incomplete"] += len(candidates) - len(kept)
-        candidates = kept
-    counts["used"] = len(candidates)
+    if entries:
+        floor = config.LOW_PULL_FRACTION * median(e.pulls for e in entries)
+        kept = [e for e in entries if e.pulls >= floor]
+        counts["incomplete"] += len(entries) - len(kept)
+        entries = kept
+    counts["used"] = len(entries)
+    counts["pulls_source"] = {src: sum(1 for e in entries if e.source == src)
+                              for src in ("wcl", "rio_fill", "rio_corrected")}
 
-    medians: dict[str, float | None] = {m: None for m in METRICS}
-    if len(candidates) >= config.MIN_BRACKET_SAMPLE:
-        for m in METRICS:
-            vals = [v for v in (_metric_values(r)[m] for r in candidates) if v is not None]
-            medians[m] = round(median(vals), 3) if len(vals) >= config.MIN_BRACKET_SAMPLE else None
+    medians: dict[str, float | None] = {}
+    n: dict[str, int] = {}
+    for m in METRICS:
+        vals = [v for v in (e.value(m) for e in entries) if v is not None]
+        n[m] = len(vals)
+        medians[m] = round(median(vals), 3) if len(vals) >= config.MIN_BRACKET_SAMPLE else None
+    counts["n"] = n
     counts["kill_share"] = round(counts["killed"] / counts["guilds"], 4) if counts["guilds"] else None
     return {"median": medians, **counts}
 
@@ -147,7 +177,7 @@ def build_snapshot(tier: Tier, guilds: list[GuildRow], now: datetime | None = No
             "bosses": bosses,
         }
     return {
-        "schema": 1,
+        "schema": 2,
         "tier": {"key": tier.key, "name": tier.name, "wcl_zone_id": tier.wcl_zone_id,
                  "starts": tier.starts.isoformat()},
         "generated_at": now.isoformat(),
@@ -158,6 +188,7 @@ def build_snapshot(tier: Tier, guilds: list[GuildRow], now: datetime | None = No
         "weeks": [w.isoformat() for w in weeks],
         "rules": {"min_sample": config.MIN_BRACKET_SAMPLE, "min_pull_seconds": config.MIN_PULL_SECONDS,
                   "night_gap_hours": config.NIGHT_GAP_HOURS, "low_pull_fraction": config.LOW_PULL_FRACTION,
-                  "exclude_first_pull_kills": config.EXCLUDE_FIRST_PULL_KILLS},
+                  "exclude_first_pull_kills": config.EXCLUDE_FIRST_PULL_KILLS,
+                  "rio_undercount_fraction": config.RIO_UNDERCOUNT_FRACTION},
         "views": views,
     }

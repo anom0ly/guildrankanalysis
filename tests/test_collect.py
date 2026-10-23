@@ -68,3 +68,21 @@ def test_collect_is_resumable_and_skips_other_bosses():
     pulls = store.pulls_by_guild(TIER.key)
     assert all(p.encounter_id == 3470 for ps in pulls.values() for p in ps)
     assert sum(len(ps) for ps in pulls.values()) == 4
+
+
+def test_raiderio_pulls_parsed_and_stored():
+    from guildpulls.raiderio import parse_entry
+    entry = {"rank": 7, "regionRank": 3,
+             "guild": {"id": 5, "name": "x", "realm": {"slug": "r"}, "region": {"slug": "eu"}},
+             "encountersDefeated": [{"slug": "sszorak", "firstDefeated": "2026-09-01T00:00:00Z"}],
+             "guildPrivacy": {"raidPulls": True},
+             "encountersPulled": [{"slug": "sszorak", "numPulls": 42, "isDefeated": True},
+                                  {"slug": "ulatek", "numPulls": 90, "isDefeated": False},
+                                  {"slug": "the-twin-fangs", "isDefeated": True}]}
+    g = parse_entry(entry)
+    assert g["rio_pulls"] == {"sszorak": 42}
+    entry["guildPrivacy"]["raidPulls"] = False
+    assert parse_entry(entry)["rio_pulls"] == {}
+    store = Store(":memory:")
+    store.replace_rankings(TIER.key, [g], NOW.isoformat())
+    assert store.rio_pulls(TIER.key) == {5: {"sszorak": 42}}

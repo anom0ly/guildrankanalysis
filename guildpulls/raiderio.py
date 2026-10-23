@@ -17,6 +17,7 @@ USER_AGENT = "guildrankanalysis/0.1 (+https://github.com/anom0ly/guildrankanalys
 
 def parse_entry(entry: dict) -> dict:
     g = entry["guild"]
+    pulls_public = entry.get("guildPrivacy", {}).get("raidPulls", True)
     return {
         "rio_guild_id": g["id"],
         "name": g["name"],
@@ -28,6 +29,12 @@ def parse_entry(entry: dict) -> dict:
             e["slug"]: e["firstDefeated"]
             for e in entry.get("encountersDefeated", [])
             if e.get("firstDefeated")
+        },
+        # Pulls to kill per boss, only for kills and only when the guild shares pulls.
+        "rio_pulls": {
+            e["slug"]: e["numPulls"]
+            for e in entry.get("encountersPulled", [])
+            if pulls_public and e.get("isDefeated") and e.get("numPulls")
         },
     }
 
