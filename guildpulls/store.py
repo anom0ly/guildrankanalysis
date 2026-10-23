@@ -47,6 +47,7 @@ CREATE TABLE IF NOT EXISTS reports (
     start_ms INTEGER NOT NULL,
     end_ms INTEGER NOT NULL,
     fetched_at_ms INTEGER NOT NULL,
+    enriched_at_ms INTEGER,  -- set by the enrich step; cleared when the report is fetched again
     PRIMARY KEY (tier, code)
 );
 CREATE INDEX IF NOT EXISTS reports_guild ON reports (tier, wcl_guild_id);
@@ -66,6 +67,12 @@ CREATE TABLE IF NOT EXISTS pulls (
     boss_percentage REAL,
     last_phase INTEGER,
     fight_percentage REAL,
+    -- Filled by the enrich step (NULL until then).
+    players TEXT,  -- comma-separated player ids
+    deaths INTEGER,
+    early_deaths INTEGER,
+    third_death_ms INTEGER,
+    killers TEXT,  -- "ability id:deaths,..."
     PRIMARY KEY (tier, report_code, fight_id)
 );
 CREATE INDEX IF NOT EXISTS pulls_guild ON pulls (tier, wcl_guild_id);
@@ -93,6 +100,28 @@ CREATE TABLE IF NOT EXISTS encounter_phases (
     is_intermission INTEGER NOT NULL,
     PRIMARY KEY (encounter_id, phase_id)
 );
+-- Characters seen in enriched pulls, so a pull's roster is a list of small ids.
+CREATE TABLE IF NOT EXISTS players (
+    id INTEGER PRIMARY KEY,
+    name TEXT NOT NULL,
+    server TEXT NOT NULL,
+    UNIQUE (name, server)
+);
+CREATE TABLE IF NOT EXISTS abilities (
+    id INTEGER PRIMARY KEY,
+    name TEXT
+);
+-- The first kill of each boss per guild, from WCL rankings. raid_dps NULL
+-- means WCL had no rankings for the fight (looked up, nothing there).
+CREATE TABLE IF NOT EXISTS kill_summary (
+    tier TEXT NOT NULL,
+    report_code TEXT NOT NULL,
+    fight_id INTEGER NOT NULL,
+    raid_dps REAL,
+    raid_hps REAL,
+    specs TEXT,  -- "Class-Spec:count,..."
+    PRIMARY KEY (tier, report_code, fight_id)
+);
 CREATE TABLE IF NOT EXISTS snapshots (
     tier TEXT NOT NULL,
     day TEXT NOT NULL,
@@ -101,6 +130,18 @@ CREATE TABLE IF NOT EXISTS snapshots (
     PRIMARY KEY (tier, day)
 );
 """
+
+
+def _ids(s: str | None) -> tuple[int, ...] | None:
+    if s is None:
+        return None
+    return tuple(int(x) for x in s.split(",") if x)
+
+
+def _pairs(s: str | None) -> tuple[tuple[int, int], ...] | None:
+    if s is None:
+        return None
+    return tuple((int(a), int(n)) for a, n in (x.split(":") for x in s.split(",") if x))
 
 
 class Store:
@@ -112,13 +153,25 @@ class Store:
         self.db.row_factory = sqlite3.Row
         self.db.executescript(SCHEMA)
         self._migrate()
+        self._players: dict[tuple[str, str], int] | None = None
+
+    ADDED_COLUMNS = (
+        ("pulls", "fight_percentage", "REAL"),
+        ("pulls", "players", "TEXT"),
+        ("pulls", "deaths", "INTEGER"),
+        ("pulls", "early_deaths", "INTEGER"),
+        ("pulls", "third_death_ms", "INTEGER"),
+        ("pulls", "killers", "TEXT"),
+        ("reports", "enriched_at_ms", "INTEGER"),
+    )
 
     def _migrate(self) -> None:
         """Columns added after the first load, for databases created before them."""
-        cols = {r[1] for r in self.db.execute("PRAGMA table_info(pulls)")}
-        if "fight_percentage" not in cols:
-            with self.db:
-                self.db.execute("ALTER TABLE pulls ADD COLUMN fight_percentage REAL")
+        for table, col, kind in self.ADDED_COLUMNS:
+            cols = {r[1] for r in self.db.execute(f"PRAGMA table_info({table})")}
+            if col not in cols:
+                with self.db:
+                    self.db.execute(f"ALTER TABLE {table} ADD COLUMN {col} {kind}")
 
     def close(self) -> None:
         self.db.close()
@@ -195,7 +248,8 @@ class Store:
                   int(p.kill), p.item_level, p.boss_percentage, p.last_phase, p.fight_percentage) for p in pulls],
             )
             self.db.execute(
-                "INSERT OR REPLACE INTO reports VALUES (?,?,?,?,?,?)",
+                "INSERT OR REPLACE INTO reports (tier, code, wcl_guild_id, start_ms, end_ms, fetched_at_ms) "
+                "VALUES (?,?,?,?,?,?)",
                 (tier, code, wcl_guild_id, start_ms, end_ms, fetched_at_ms),
             )
 
@@ -207,8 +261,83 @@ class Store:
                 kill=bool(r["kill"]), item_level=r["item_level"], boss_percentage=r["boss_percentage"],
                 last_phase=r["last_phase"], report_code=r["report_code"], fight_id=r["fight_id"],
                 fight_percentage=r["fight_percentage"],
+                players=_ids(r["players"]), deaths=r["deaths"], early_deaths=r["early_deaths"],
+                third_death_ms=r["third_death_ms"], killers=_pairs(r["killers"]),
             ))
         return out
+
+    # Enrichment
+    def reports_to_enrich(self, tier: str) -> list[sqlite3.Row]:
+        """Reports with pulls not yet enriched, best-ranked guild first, so the
+        top brackets fill first and a stopped run resumes where it was."""
+        return self.db.execute(
+            "SELECT r.code, r.wcl_guild_id, MIN(g.world_rank) AS rank FROM reports r "
+            "JOIN wcl_match m ON m.wcl_guild_id = r.wcl_guild_id "
+            "JOIN guilds g ON g.rio_guild_id = m.rio_guild_id AND g.tier = r.tier "
+            "WHERE r.tier = ? AND r.enriched_at_ms IS NULL "
+            "AND EXISTS (SELECT 1 FROM pulls p WHERE p.tier = r.tier AND p.report_code = r.code) "
+            "GROUP BY r.code ORDER BY rank, r.start_ms", (tier,)
+        ).fetchall()
+
+    def enrich_counts(self, tier: str) -> tuple[int, int]:
+        """(enriched, total) reports with pulls."""
+        row = self.db.execute(
+            "SELECT SUM(enriched_at_ms IS NOT NULL), COUNT(*) FROM reports r WHERE tier = ? "
+            "AND EXISTS (SELECT 1 FROM pulls p WHERE p.tier = r.tier AND p.report_code = r.code)", (tier,)
+        ).fetchone()
+        return (row[0] or 0, row[1] or 0)
+
+    def fight_ids(self, tier: str, code: str) -> list[int]:
+        return [r[0] for r in self.db.execute(
+            "SELECT fight_id FROM pulls WHERE tier = ? AND report_code = ? ORDER BY fight_id", (tier, code))]
+
+    def player_ids(self, chars: Iterable[tuple[str, str]]) -> dict[tuple[str, str], int]:
+        """Stored id for each (name, server), adding the ones not seen before."""
+        if self._players is None:
+            self._players = {(r[1], r[2]): r[0] for r in self.db.execute("SELECT id, name, server FROM players")}
+        with self.db:
+            for key in set(chars) - self._players.keys():
+                cur = self.db.execute("INSERT INTO players (name, server) VALUES (?, ?)", key)
+                self._players[key] = cur.lastrowid
+        return self._players
+
+    def save_enrichment(self, tier: str, code: str, now_ms: int, fights: dict[int, dict]) -> None:
+        """Per fight: fight_percentage, players (ids), deaths, early_deaths,
+        third_death_ms and killers ({ability id: deaths}). Marks the report done."""
+        with self.db:
+            for fid, f in fights.items():
+                self.db.execute(
+                    "UPDATE pulls SET fight_percentage = COALESCE(?, fight_percentage), players = ?, deaths = ?, "
+                    "early_deaths = ?, third_death_ms = ?, killers = ? WHERE tier = ? AND report_code = ? AND fight_id = ?",
+                    (f.get("fight_percentage"), ",".join(map(str, f["players"])) if f.get("players") is not None else None,
+                     f["deaths"], f["early_deaths"], f["third_death_ms"],
+                     ",".join(f"{a}:{n}" for a, n in sorted(f["killers"].items())), tier, code, fid),
+                )
+            self.db.execute("UPDATE reports SET enriched_at_ms = ? WHERE tier = ? AND code = ?", (now_ms, tier, code))
+
+    def kill_summaries(self, tier: str) -> dict[tuple[str, int], dict]:
+        out = {}
+        for r in self.db.execute("SELECT * FROM kill_summary WHERE tier = ?", (tier,)):
+            out[(r["report_code"], r["fight_id"])] = {
+                "raid_dps": r["raid_dps"], "raid_hps": r["raid_hps"],
+                "specs": {k: int(n) for k, n in (x.rsplit(":", 1) for x in r["specs"].split(",") if x)} if r["specs"] else {},
+            }
+        return out
+
+    def save_kill_summary(self, tier: str, code: str, fight_id: int, raid_dps: float | None,
+                          raid_hps: float | None, specs: dict[str, int]) -> None:
+        with self.db:
+            self.db.execute(
+                "INSERT OR REPLACE INTO kill_summary VALUES (?,?,?,?,?,?)",
+                (tier, code, fight_id, raid_dps, raid_hps, ",".join(f"{k}:{n}" for k, n in sorted(specs.items()))),
+            )
+
+    def ability_names(self) -> dict[int, str]:
+        return {r[0]: r[1] for r in self.db.execute("SELECT id, name FROM abilities WHERE name IS NOT NULL")}
+
+    def save_ability_names(self, names: dict[int, str | None]) -> None:
+        with self.db:
+            self.db.executemany("INSERT OR REPLACE INTO abilities VALUES (?, ?)", list(names.items()))
 
     def report_with_encounter(self, tier: str, encounter_id: int) -> str | None:
         row = self.db.execute(

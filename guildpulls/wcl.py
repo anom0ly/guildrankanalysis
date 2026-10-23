@@ -186,6 +186,74 @@ class WCLClient:
                 for e in rep.get("phases") or []}
 
 
+    def enrich_reports(self, items: list[tuple[str, list[int]]]) -> dict[str, dict]:
+        """For each (report code, stored fight ids): the fights again (for
+        fightPercentage and the players in each), the report's players and
+        ability names, and every player death in those fights.
+
+        Deaths come from events, about 10 points a report. The Deaths table
+        is cheaper but stops at 200 deaths a report, which a progression night
+        passes. The first read of a report's events is slow on WCL's side
+        (2-20 s), so callers run several of these at once."""
+        if not items:
+            return {}
+
+        def events(code, fids, start=None):
+            since = f", startTime: {float(start)}" if start is not None else ""
+            return (f"events(dataType: Deaths, hostilityType: Friendlies, fightIDs: {sorted(fids)}, "
+                    f"limit: 10000{since}) {{ data nextPageTimestamp }}")
+        parts = " ".join(
+            f'r{i}: report(code: "{_safe_code(code)}") {{ fights(fightIDs: {sorted(fids)}) '
+            "{ id startTime endTime fightPercentage friendlyPlayers } "
+            'masterData { actors(type: "Player") { id name server } abilities { gameID name } } '
+            f"{events(code, fids)} }}"
+            for i, (code, fids) in enumerate(items))
+        data = self.query(f"reportData {{ {parts} }}")["reportData"]
+        out = {}
+        for i, (code, fids) in enumerate(items):
+            rep = data.get(f"r{i}")
+            if not rep:
+                continue
+            page = rep["events"]
+            found = list(page["data"] or [])
+            while page.get("nextPageTimestamp"):
+                page = self.query(f'reportData {{ report(code: "{_safe_code(code)}") '
+                                  f'{{ {events(code, fids, page["nextPageTimestamp"])} }} }}')["reportData"]["report"]["events"]
+                found += page["data"] or []
+            master = rep.get("masterData") or {}
+            names = {a["gameID"]: a["name"] for a in master.get("abilities") or []}
+            out[code] = {
+                "fights": rep.get("fights") or [],
+                "actors": {a["id"]: (a["name"], a["server"] or "") for a in master.get("actors") or []},
+                "deaths": [{"fight": e.get("fight"), "timestamp": e.get("timestamp"),
+                            "killingAbilityGameID": e.get("killingAbilityGameID"),
+                            "killingAbilityName": names.get(e.get("killingAbilityGameID"))}
+                           for e in found if e.get("type") == "death"],
+            }
+        return out
+
+    def kill_rankings(self, items: list[tuple[str, list[int]]]) -> dict[str, dict[int, dict]]:
+        """Rankings for kill fights, by report and fight id: each player's
+        class, spec and DPS, and the healers' HPS."""
+        if not items:
+            return {}
+        parts = " ".join(
+            f'r{i}: report(code: "{_safe_code(code)}") {{ '
+            f"dps: rankings(fightIDs: {sorted(fids)}, playerMetric: dps) "
+            f"hps: rankings(fightIDs: {sorted(fids)}, playerMetric: hps) }}"
+            for i, (code, fids) in enumerate(items))
+        data = self.query(f"reportData {{ {parts} }}")["reportData"]
+        out: dict[str, dict[int, dict]] = {}
+        for i, (code, _) in enumerate(items):
+            rep = data.get(f"r{i}") or {}
+            fights: dict[int, dict] = {}
+            for metric in ("dps", "hps"):
+                for entry in ((rep.get(metric) or {}).get("data") or []):
+                    fights.setdefault(entry["fightID"], {})[metric] = entry.get("roles") or {}
+            out[code] = fights
+        return out
+
+
 def parse_fights(code: str, report: dict) -> list[Pull]:
     base = int(report["startTime"])
     return [

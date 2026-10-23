@@ -7,14 +7,19 @@ from statistics import median
 
 from guildpulls import config
 from guildpulls.config import Tier
-from guildpulls.metrics import BossResult, Schedule
+from guildpulls.metrics import BossResult, Roster, Schedule
 
 METRICS = ("pulls_to_kill", "nights_to_kill", "combat_hours", "item_level",
            "pulls_to_sub10", "closeout_pulls", "late_wipe_share", "longest_plateau",
-           "pulls_per_hour", "first_pull_ilvl", "ilvl_gained")
+           "pulls_per_hour", "first_pull_ilvl", "ilvl_gained",
+           # From the enrich step: deaths and roster over the counted pulls,
+           # and the first kill's rankings.
+           "deaths_per_pull", "early_deaths_per_pull", "avoidable_deaths_per_pull", "fast_loss_share",
+           "players_used", "raid_dps_on_kill", "raid_hps_on_kill", "comp_similarity")
 # Compared with the baseline as a difference rather than a multiple.
-DIFF_METRICS = {"item_level", "first_pull_ilvl", "ilvl_gained", "late_wipe_share"}
-TIER_METRICS = ("hours_per_week", "nights_per_week")
+DIFF_METRICS = {"item_level", "first_pull_ilvl", "ilvl_gained", "late_wipe_share", "fast_loss_share",
+                "comp_similarity", "core_coverage"}
+TIER_METRICS = ("hours_per_week", "nights_per_week", "regulars", "core_coverage", "new_per_week")
 HEALTH_BANDS = ("75-100", "50-75", "25-50", "0-25")
 
 
@@ -30,6 +35,8 @@ class GuildRow:
     rio_first_defeated: dict[str, str] = field(default_factory=dict)  # by Raider.IO boss slug
     rio_pulls: dict[str, int] = field(default_factory=dict)  # Raider.IO pulls to kill, by boss slug
     schedule: Schedule | None = None  # progression raid nights from the logs
+    roster: Roster | None = None  # None until every progression pull is enriched
+    kill_summaries: dict[int, dict] = field(default_factory=dict)  # first kill's DPS, HPS, specs by encounter
 
 
 def bracket_of(rank: int | None, brackets=None) -> str | None:
@@ -57,13 +64,37 @@ class Entry:
     combat_hours: float | None
     item_level: float | None
     result: BossResult | None = None  # the logged progression, when the numbers come from WCL
+    kill: dict | None = None  # the first kill's raid_dps, raid_hps and specs, when fetched
 
-    def value(self, metric: str) -> float | None:
+    def value(self, metric: str, base_specs: dict[str, float] | None = None) -> float | None:
         base = {"pulls_to_kill": self.pulls, "nights_to_kill": self.nights,
                 "combat_hours": self.combat_hours, "item_level": self.item_level}
         if metric in base:
             return base[metric]
+        if metric in KILL_METRICS:
+            return kill_metric(self.kill, metric, base_specs) if self.kill else None
         return log_metric(self.result, metric) if self.result is not None else None
+
+
+KILL_METRICS = {"raid_dps_on_kill", "raid_hps_on_kill", "comp_similarity"}
+
+
+def kill_metric(kill: dict, metric: str, base_specs: dict[str, float] | None) -> float | None:
+    if metric == "raid_dps_on_kill":
+        return kill.get("raid_dps")
+    if metric == "raid_hps_on_kill":
+        return kill.get("raid_hps")
+    if metric == "comp_similarity":
+        return similarity(kill.get("specs") or {}, base_specs) if base_specs else None
+    raise KeyError(metric)
+
+
+def similarity(specs: dict[str, float], base: dict[str, float]) -> float | None:
+    """Cosine similarity of two spec count vectors, as a percent: 100 is the
+    same mix of specs as the baseline bracket's average kill."""
+    dot = sum(n * base.get(k, 0.0) for k, n in specs.items())
+    norm = (sum(n * n for n in specs.values()) * sum(n * n for n in base.values())) ** 0.5
+    return round(100 * dot / norm, 1) if norm else None
 
 
 def late_wipe_share(r: BossResult) -> float | None:
@@ -97,6 +128,15 @@ def log_metric(r: BossResult, metric: str) -> float | None:
         if r.item_level is None or r.first_pull_ilvl is None:
             return None
         return round(r.item_level - r.first_pull_ilvl, 2)
+    per_pull = {"deaths_per_pull": r.deaths, "early_deaths_per_pull": r.early_deaths,
+                "avoidable_deaths_per_pull": r.avoidable_deaths}
+    if metric in per_pull:
+        n = per_pull[metric]
+        return round(n / r.pulls, 3) if n is not None and r.pulls else None
+    if metric == "fast_loss_share":
+        return round(100 * r.fast_losses / r.wipes, 1) if r.fast_losses is not None and r.wipes else None
+    if metric == "players_used":
+        return r.players_used
     raise KeyError(metric)
 
 
@@ -114,7 +154,8 @@ def boss_entry(g: GuildRow, boss, exclude_first_pull_kills: bool) -> Entry | str
             return Entry(rio_n, "rio_corrected", None, None, r.item_level)
         if r.first_pull_is_kill and exclude_first_pull_kills:
             return "incomplete"
-        return Entry(r.pulls, "wcl", r.nights, r.combat_hours, r.item_level, r)
+        kill = g.kill_summaries.get(boss.wcl_encounter_id)
+        return Entry(r.pulls, "wcl", r.nights, r.combat_hours, r.item_level, r, kill)
     if rio_n:
         return Entry(rio_n, "rio_fill", None, None, None)
     return "no_pull_data" if boss.rio_slug in g.rio_first_defeated else "not_killed"
@@ -164,10 +205,62 @@ def wipe_mix(entries: list[Entry]) -> dict | None:
             "shares": {k: round(totals.get(k, 0.0) / len(rs), 4) for k in keys}, "n": len(rs)}
 
 
+def bracket_killers(entries: list[Entry], ids: list[int]) -> dict | None:
+    """Deaths per pull to each of `ids`, pooled over the bracket's enriched
+    guilds (all their counted pulls)."""
+    rs = [e.result for e in entries if e.result is not None and e.result.deaths is not None]
+    if len(rs) < config.MIN_BRACKET_SAMPLE:
+        return None
+    pulls = sum(r.pulls for r in rs)
+    totals: dict[int, int] = {}
+    for r in rs:
+        for aid, n in r.killers:
+            totals[aid] = totals.get(aid, 0) + n
+    return {"per_pull": {str(a): round(totals.get(a, 0) / pulls, 4) for a in ids},
+            "all_per_pull": round(sum(totals.values()) / pulls, 4), "n": len(rs)}
+
+
+def bracket_specs(entries: list[Entry]) -> dict | None:
+    """Average count of each spec on the first kill."""
+    kills = [e.kill["specs"] for e in entries if e.kill and e.kill.get("specs")]
+    if len(kills) < config.MIN_BRACKET_SAMPLE:
+        return None
+    return {"mean": mean_specs(kills), "n": len(kills)}
+
+
+def mean_specs(kills: list[dict[str, int]]) -> dict[str, float]:
+    totals: dict[str, float] = {}
+    for specs in kills:
+        for k, n in specs.items():
+            totals[k] = totals.get(k, 0) + n
+    return {k: round(v / len(kills), 3) for k, v in sorted(totals.items(), key=lambda kv: -kv[1])}
+
+
+def baseline_specs(members: list[GuildRow], boss) -> dict[str, float] | None:
+    """The baseline bracket's average spec mix on this boss, for comp similarity."""
+    kills = [g.kill_summaries[boss.wcl_encounter_id]["specs"] for g in members
+             if g.kill_summaries.get(boss.wcl_encounter_id, {}).get("specs")]
+    return mean_specs(kills) if len(kills) >= config.MIN_BRACKET_SAMPLE else None
+
+
+def top_killer_ids(guilds: list[GuildRow], boss) -> list[int]:
+    """The abilities that kill the most players on a boss across every guild,
+    plus the hand-picked avoidable ones."""
+    totals: dict[int, int] = {}
+    for g in guilds:
+        r = g.results.get(boss.wcl_encounter_id)
+        for aid, n in (r.killers if r else ()):
+            if aid:
+                totals[aid] = totals.get(aid, 0) + n
+    ids = sorted(totals, key=lambda a: -totals[a])[:config.TOP_KILLERS]
+    return ids + sorted(a for a in config.AVOIDABLE_ABILITIES.get(boss.wcl_encounter_id, ()) if a not in ids)
+
+
 def boss_cell(members: list[GuildRow], boss,
-              exclude_first_pull_kills: bool | None = None, detail: bool = False) -> dict:
+              exclude_first_pull_kills: bool | None = None, detail: bool = False,
+              base_specs: dict[str, float] | None = None, killer_ids: list[int] | None = None) -> dict:
     """One bracket x boss cell: medians plus the counts the page shows.
-    `detail` adds the learning curve and wipe mix (latest week only)."""
+    `detail` adds the learning curve, wipe mix, killers and specs (latest week only)."""
     if exclude_first_pull_kills is None:
         exclude_first_pull_kills = config.EXCLUDE_FIRST_PULL_KILLS
     counts = {"guilds": len(members), "killed": 0, "unmatched": 0, "pending": 0,
@@ -202,7 +295,7 @@ def boss_cell(members: list[GuildRow], boss,
     medians: dict[str, float | None] = {}
     n: dict[str, int] = {}
     for m in METRICS:
-        vals = [v for v in (e.value(m) for e in entries) if v is not None]
+        vals = [v for v in (e.value(m, base_specs) for e in entries) if v is not None]
         n[m] = len(vals)
         medians[m] = round(median(vals), 3) if len(vals) >= config.MIN_BRACKET_SAMPLE else None
     counts["n"] = n
@@ -211,6 +304,8 @@ def boss_cell(members: list[GuildRow], boss,
     if detail:
         out["curve"] = bracket_curve(entries)
         out["wipe_mix"] = wipe_mix(entries)
+        out["killers"] = bracket_killers(entries, killer_ids or [])
+        out["specs"] = bracket_specs(entries)
     return out
 
 
@@ -286,14 +381,17 @@ WEEKLY_KEYS = ("median", "vs_top", "n", "used", "killed", "guilds", "pulls_sourc
 
 
 def boss_cells(by_bracket: dict[str, list[GuildRow]], by_slice: dict[str, list[GuildRow]], boss,
-               week_end: datetime | None = None) -> dict[str, dict]:
+               week_end: datetime | None = None, killer_ids: list[int] | None = None) -> dict[str, dict]:
     """Every bracket and slice cell for one boss, with multiples of the top bracket."""
     def members_at(members):
         return members if week_end is None else [as_of(g, boss, week_end) for g in members]
     detail = week_end is None
-    cells = {label: boss_cell(members_at(m), boss, detail=detail) for label, m in by_bracket.items()}
+    # The baseline's spec mix as it stands now, also for past weeks.
+    base_specs = baseline_specs(by_bracket[config.BRACKETS[0][0]], boss)
+    kw = {"detail": detail, "base_specs": base_specs, "killer_ids": killer_ids}
+    cells = {label: boss_cell(members_at(m), boss, **kw) for label, m in by_bracket.items()}
     add_comparisons(cells)
-    slices = {label: boss_cell(members_at(m), boss, detail=detail) for label, m in by_slice.items()}
+    slices = {label: boss_cell(members_at(m), boss, **kw) for label, m in by_slice.items()}
     add_comparisons(slices, cells[config.BRACKETS[0][0]])
     return {**cells, **slices}
 
@@ -330,12 +428,25 @@ def guild_schedule_numbers(tier: Tier, g: GuildRow) -> dict[str, float] | None:
     return {"hours_per_week": s.hours / weeks, "nights_per_week": len(s.nights) / weeks}
 
 
+def guild_roster_numbers(g: GuildRow) -> dict[str, float] | None:
+    r = g.roster
+    if g.status != "matched" or r is None:
+        return None
+    out = {"regulars": r.regulars, "core_coverage": round(100 * r.core_coverage, 1)}
+    if r.new_per_week is not None:
+        out["new_per_week"] = r.new_per_week
+    return out
+
+
 def tier_cell(tier: Tier, members: list[GuildRow]) -> dict:
-    """Whole-tier numbers for one bracket: raid schedule medians."""
-    vals = [v for v in (guild_schedule_numbers(tier, g) for g in members) if v is not None]
-    medians = {m: (round(median(v[m] for v in vals), 2) if len(vals) >= config.MIN_BRACKET_SAMPLE else None)
-               for m in TIER_METRICS}
-    return {"median": medians, "n": len(vals)}
+    """Whole-tier numbers for one bracket: raid schedule and roster medians."""
+    rows = [{**(guild_schedule_numbers(tier, g) or {}), **(guild_roster_numbers(g) or {})} for g in members]
+    medians, n = {}, {}
+    for m in TIER_METRICS:
+        vals = [r[m] for r in rows if m in r]
+        n[m] = len(vals)
+        medians[m] = round(median(vals), 2) if len(vals) >= config.MIN_BRACKET_SAMPLE else None
+    return {"median": medians, "n": n}
 
 
 def tier_summary(tier: Tier, by_bracket: dict[str, list[GuildRow]],
@@ -359,9 +470,11 @@ def stage_names(phases: list[dict]) -> dict[str, str]:
 
 
 def build_snapshot(tier: Tier, guilds: list[GuildRow], now: datetime | None = None,
-                   phases: dict[int, list[dict]] | None = None) -> dict:
+                   phases: dict[int, list[dict]] | None = None,
+                   ability_names: dict[int, str] | None = None) -> dict:
     now = now or datetime.now(timezone.utc)
     weeks = tier_weeks(tier, now)
+    killer_ids = {b.rio_slug: top_killer_ids(guilds, b) for b in tier.bosses}
     views = {}
     for view in config.REGIONS:
         by_bracket: dict[str, list[GuildRow]] = {label: [] for label, _, _ in config.BRACKETS}
@@ -377,7 +490,7 @@ def build_snapshot(tier: Tier, guilds: list[GuildRow], now: datetime | None = No
         groups = {**by_bracket, **by_slice}
         bosses = {}
         for boss in tier.bosses:
-            cells = boss_cells(by_bracket, by_slice, boss)
+            cells = boss_cells(by_bracket, by_slice, boss, killer_ids=killer_ids[boss.rio_slug])
             weekly = weekly_cells(by_bracket, by_slice, boss, weeks)
             for label, members in groups.items():
                 cells[label]["kill_share_weekly"] = weekly_kill_share(members, boss, weeks)
@@ -389,8 +502,9 @@ def build_snapshot(tier: Tier, guilds: list[GuildRow], now: datetime | None = No
             "tier_summary": tier_summary(tier, by_bracket, by_slice),
         }
     phases = phases or {}
+    names = ability_names or {}
     return {
-        "schema": 5,
+        "schema": 6,
         "tier": {"key": tier.key, "name": tier.name, "wcl_zone_id": tier.wcl_zone_id,
                  "starts": tier.starts.isoformat(), "ends": tier.ends.isoformat() if tier.ends else None,
                  "rio_pulls": tier.rio_pulls},
@@ -404,12 +518,19 @@ def build_snapshot(tier: Tier, guilds: list[GuildRow], now: datetime | None = No
         "tier_metrics": list(TIER_METRICS),
         "stages": {b.rio_slug: stage_names(phases.get(b.wcl_encounter_id, [])) for b in tier.bosses},
         "weeks": [w.isoformat() for w in weeks],
+        "killers": {slug: [{"id": a, "name": names.get(a),
+                            "avoidable": a in config.AVOIDABLE_ABILITIES.get(b.wcl_encounter_id, ())}
+                           for a in killer_ids[slug]]
+                    for b in tier.bosses for slug in [b.rio_slug]},
         "rules": {"min_sample": config.MIN_BRACKET_SAMPLE, "min_pull_seconds": config.MIN_PULL_SECONDS,
                   "night_gap_hours": config.NIGHT_GAP_HOURS, "low_pull_fraction": config.LOW_PULL_FRACTION,
                   "exclude_first_pull_kills": config.EXCLUDE_FIRST_PULL_KILLS,
                   "rio_undercount_fraction": config.RIO_UNDERCOUNT_FRACTION,
                   "sub10_health": config.SUB10_HEALTH, "plateau_step": config.PLATEAU_STEP,
                   "low_wipe_health": config.LOW_WIPE_HEALTH,
-                  "schedule_min_week_coverage": config.SCHEDULE_MIN_WEEK_COVERAGE},
+                  "schedule_min_week_coverage": config.SCHEDULE_MIN_WEEK_COVERAGE,
+                  "early_death_seconds": config.EARLY_DEATH_SECONDS, "fast_loss_seconds": config.FAST_LOSS_SECONDS,
+                  "core_size": config.CORE_SIZE, "core_present": config.CORE_PRESENT,
+                  "fill_in_pulls": config.FILL_IN_PULLS, "settle_weeks": config.SETTLE_WEEKS},
         "views": views,
     }

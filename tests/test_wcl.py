@@ -78,3 +78,20 @@ def test_parse_fights_makes_times_absolute():
     ]}
     [p] = parse_fights("ABC", rep)
     assert (p.start_ms, p.end_ms, p.kill, p.item_level, p.fight_id) == (1_005_000, 1_065_000, True, 711.2, 3)
+
+
+def test_enrich_reports_pages_death_events_and_names_killers():
+    report = {"fights": [{"id": 4, "startTime": 0, "endTime": 9, "fightPercentage": 12.5, "friendlyPlayers": [7]}],
+              "masterData": {"actors": [{"id": 7, "name": "Ann", "server": None}],
+                             "abilities": [{"gameID": 1284209, "name": "Living Venom"}]},
+              "events": {"data": [{"type": "death", "fight": 4, "timestamp": 5, "killingAbilityGameID": 1284209},
+                                  {"type": "applybuff", "fight": 4}], "nextPageTimestamp": 6}}
+    page2 = {"report": {"events": {"data": [{"type": "death", "fight": 4, "timestamp": 7}], "nextPageTimestamp": None}}}
+    c, _ = client([FakeResponse(200, {"data": {"reportData": {"r0": report}, **rate(10)}}),
+                   FakeResponse(200, {"data": {"reportData": page2, **rate(12)}})])
+    got = c.enrich_reports([("abc", [4])])["abc"]
+    assert got["actors"] == {7: ("Ann", "")}
+    assert got["deaths"] == [{"fight": 4, "timestamp": 5, "killingAbilityGameID": 1284209,
+                              "killingAbilityName": "Living Venom"},
+                             {"fight": 4, "timestamp": 7, "killingAbilityGameID": None, "killingAbilityName": None}]
+    assert "startTime: 6.0" in c.session.calls[-1][1]["json"]["query"]

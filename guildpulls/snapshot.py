@@ -9,7 +9,7 @@ from guildpulls.aggregate import GuildRow, build_snapshot
 from guildpulls import config
 from guildpulls.collect import WCL_REGIONS
 from guildpulls.config import Tier
-from guildpulls.metrics import guild_results, guild_schedule
+from guildpulls.metrics import first_kills, guild_results, guild_roster, guild_schedule
 from guildpulls.store import Store
 
 
@@ -21,6 +21,8 @@ def load_guild_rows(store: Store, tier: Tier) -> list[GuildRow]:
     rio_pulls = store.rio_pulls(tier.key) if tier.rio_pulls else {}
     pulls = store.pulls_by_guild(tier.key)
     encounter_ids = [b.wcl_encounter_id for b in tier.bosses]
+    summaries = store.kill_summaries(tier.key)
+    tier_start_ms = int(tier.starts.timestamp() * 1000)
     results_cache: dict[int, tuple] = {}
     rows = []
     for g in store.guilds(tier.key):
@@ -30,13 +32,16 @@ def load_guild_rows(store: Store, tier: Tier) -> list[GuildRow]:
             status = "matched"
             if wcl_id not in results_cache:
                 gp = pulls.get(wcl_id, [])
-                results_cache[wcl_id] = (guild_results(gp, encounter_ids), guild_schedule(gp, encounter_ids))
-            results, sched = results_cache[wcl_id]
+                kill_sums = {p.encounter_id: summaries[(p.report_code, p.fight_id)]
+                             for p in first_kills(gp, encounter_ids) if (p.report_code, p.fight_id) in summaries}
+                results_cache[wcl_id] = (guild_results(gp, encounter_ids), guild_schedule(gp, encounter_ids),
+                                         guild_roster(gp, encounter_ids, tier_start_ms), kill_sums)
+            results, sched, rost, kill_sums = results_cache[wcl_id]
         else:
             status = "pending" if rid not in matches and g["region"] in WCL_REGIONS else "unmatched"
-            results, sched = {}, None
+            results, sched, rost, kill_sums = {}, None, None, {}
         rows.append(GuildRow(rid, g["name"], g["region"], g["world_rank"], g["region_rank"], status,
-                             results, kills.get(rid, {}), rio_pulls.get(rid, {}), sched))
+                             results, kills.get(rid, {}), rio_pulls.get(rid, {}), sched, rost, kill_sums))
     return rows
 
 
@@ -52,17 +57,22 @@ def guild_detail(tier: Tier, rows: list[GuildRow]) -> list[dict]:
                                       "combat_hours": round(r.combat_hours, 3), "item_level": r.item_level,
                                       "first_pull_is_kill": r.first_pull_is_kill,
                                       "pulls_to_sub10": r.pulls_to_sub10, "longest_plateau": r.longest_plateau,
-                                      "first_pull_ilvl": r.first_pull_ilvl}
+                                      "first_pull_ilvl": r.first_pull_ilvl, "deaths": r.deaths,
+                                      "early_deaths": r.early_deaths, "avoidable_deaths": r.avoidable_deaths,
+                                      "fast_losses": r.fast_losses, "players_used": r.players_used,
+                                      **({"kill": g.kill_summaries[b.wcl_encounter_id]}
+                                         if b.wcl_encounter_id in g.kill_summaries else {})}
         out.append({"name": g.name, "region": g.region, "world_rank": g.world_rank,
                     "region_rank": g.region_rank, "status": g.status, "bosses": bosses,
-                    "rio_pulls": g.rio_pulls})
+                    "rio_pulls": g.rio_pulls,
+                    "roster": g.roster.__dict__ if g.roster else None})
     return out
 
 
 def write_snapshot(store: Store, tier: Tier, out_dir: str | Path, now: datetime | None = None) -> Path:
     now = now or datetime.now(timezone.utc)
     rows = load_guild_rows(store, tier)
-    snap = build_snapshot(tier, rows, now, store.phases())
+    snap = build_snapshot(tier, rows, now, store.phases(), store.ability_names())
     day = now.date().isoformat()
     d = Path(out_dir) / tier.key
     d.mkdir(parents=True, exist_ok=True)
@@ -91,6 +101,7 @@ def write_index(store: Store, tiers: list[Tier], out_dir: str | Path, run_tier: 
             "guilds": f"{tier.key}/guilds.json" if snap else None,
             "updated_at": snap["created_at"] if snap else None,
             "backfill": backfill_progress(store, tier),
+            "enrich": enrich_progress(store, tier),
         })
     row = store.latest_run(run_tier)
     if row:
@@ -117,3 +128,11 @@ def backfill_progress(store: Store, tier: Tier) -> dict | None:
         return {"state": "complete", "done": len(store.guilds(tier.key)), "total": len(store.guilds(tier.key))}
     counts = store.run_status_counts(tier.key, config.BACKFILL_RUN_ID)
     return {"state": "loading", "done": sum(counts.values()), "total": len(store.guilds(tier.key))}
+
+
+def enrich_progress(store: Store, tier: Tier) -> dict | None:
+    """How many of a tier's reports have had the second read (roster, deaths)."""
+    if tier.key not in config.ENRICH_TIERS:
+        return None
+    done, total = store.enrich_counts(tier.key)
+    return {"done": done, "total": total}

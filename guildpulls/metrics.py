@@ -31,6 +31,17 @@ class Pull:
     # WCL's fightPercentage: progress through the whole fight, across phases.
     # Stored from 23 Oct 2026; older pulls estimate it (see fight_left).
     fight_percentage: float | None = None
+    # From the enrich step (None until the report is enriched): the players in
+    # the pull, as stored player ids, and its deaths.
+    players: tuple[int, ...] | None = None
+    deaths: int | None = None
+    early_deaths: int | None = None  # deaths in the first EARLY_DEATH_SECONDS
+    third_death_ms: int | None = None  # time into the pull of the third death
+    killers: tuple[tuple[int, int], ...] | None = None  # (killing ability id, deaths)
+
+    @property
+    def enriched(self) -> bool:
+        return self.deaths is not None
 
     @property
     def duration_ms(self) -> int:
@@ -59,6 +70,14 @@ class BossResult:
     kill_phase: int | None = None
     first_pull_ilvl: float | None = None
     boss_hours: float = 0.0  # raid time spent on this boss: first to last pull of it, per night
+    # Deaths, when every counted pull is enriched; else None.
+    deaths: int | None = None
+    early_deaths: int | None = None
+    avoidable_deaths: int | None = None
+    fast_losses: int | None = None  # wipes that ended soon after the third death
+    killers: tuple[tuple[int, int], ...] = ()
+    players_used: int | None = None  # distinct players across the counted pulls
+    kill_key: tuple[str, int] | None = None  # (report code, fight id) of the kill pull
 
     @property
     def combat_hours(self) -> float:
@@ -68,7 +87,7 @@ class BossResult:
 def _better(a: Pull, b: Pull) -> Pull:
     """Pick which copy of a duplicated pull to keep."""
     def score(p: Pull) -> tuple:
-        return (p.kill, p.item_level is not None, p.duration_ms)
+        return (p.kill, p.item_level is not None, p.enriched, p.duration_ms)
     return a if score(a) >= score(b) else b
 
 
@@ -227,7 +246,33 @@ def boss_result(encounter_id: int, pulls: Iterable[Pull]) -> BossResult | None:
         kill_phase=(kill.last_phase or 0) if kill else None,
         first_pull_ilvl=counted[0].item_level,
         boss_hours=sum(night_hours(n) for n in split_nights(counted)),
+        kill_key=(kill.report_code, kill.fight_id) if kill else None,
+        **death_numbers(encounter_id, counted),
     )
+
+
+def death_numbers(encounter_id: int, counted: list[Pull]) -> dict:
+    """Deaths and roster size over the counted pulls, left out (None) unless
+    every one of them has been enriched, so a half-read guild never reads low."""
+    out: dict = {}
+    if counted and all(p.enriched for p in counted):
+        avoid = config.AVOIDABLE_ABILITIES.get(encounter_id)
+        killers: dict[int, int] = {}
+        for p in counted:
+            for aid, n in p.killers or ():
+                killers[aid] = killers.get(aid, 0) + n
+        fast = config.FAST_LOSS_SECONDS * 1000
+        out.update(
+            deaths=sum(p.deaths for p in counted),
+            early_deaths=sum(p.early_deaths or 0 for p in counted),
+            avoidable_deaths=sum(n for aid, n in killers.items() if aid in avoid) if avoid else None,
+            fast_losses=sum(1 for p in counted if not p.kill and p.third_death_ms is not None
+                            and p.duration_ms - p.third_death_ms <= fast),
+            killers=tuple(sorted(killers.items())),
+        )
+    if counted and all(p.players is not None for p in counted):
+        out["players_used"] = len({pid for p in counted for pid in p.players})
+    return out
 
 
 def _bands(wipes: list[Pull], stages: int) -> tuple[int, int, int, int]:
@@ -263,6 +308,53 @@ def guild_results(pulls: Iterable[Pull], encounter_ids: Iterable[int]) -> dict[i
         if r is not None:
             results[eid] = r
     return results
+
+
+@dataclass(frozen=True)
+class Roster:
+    """Who a guild brought across its progression pulls on every boss."""
+    regulars: int  # players in at least FILL_IN_PULLS progression pulls
+    fill_ins: int
+    core_coverage: float  # share of pulls with CORE_PRESENT of the CORE_SIZE most-used players
+    new_per_week: float | None  # regulars first seen after the guild's first SETTLE_WEEKS logged weeks
+
+
+def roster(counted: list[Pull], tier_start_ms: int) -> Roster | None:
+    if not counted or any(p.players is None for p in counted):
+        return None
+    uses: dict[int, int] = {}
+    first: dict[int, int] = {}
+    week = lambda ms: int((ms - tier_start_ms) // (7 * 86_400_000))
+    for p in sorted(counted, key=lambda p: p.start_ms):
+        for pid in p.players:
+            uses[pid] = uses.get(pid, 0) + 1
+            first.setdefault(pid, week(p.start_ms))
+    regulars = [pid for pid, n in uses.items() if n >= config.FILL_IN_PULLS]
+    core = set(sorted(uses, key=lambda pid: -uses[pid])[:config.CORE_SIZE])
+    with_core = sum(1 for p in counted if len(core.intersection(p.players)) >= config.CORE_PRESENT)
+    weeks = sorted({week(p.start_ms) for p in counted})
+    later = weeks[config.SETTLE_WEEKS:]
+    new = sum(1 for pid in regulars if first[pid] in later)
+    return Roster(len(regulars), len(uses) - len(regulars), round(with_core / len(counted), 4),
+                  round(new / len(later), 3) if later else None)
+
+
+def guild_roster(pulls: Iterable[Pull], encounter_ids: Iterable[int], tier_start_ms: int) -> Roster | None:
+    deduped = dedupe(pulls)
+    counted = [p for eid in encounter_ids for p in progression_pulls(q for q in deduped if q.encounter_id == eid)]
+    return roster(counted, tier_start_ms)
+
+
+def first_kills(pulls: Iterable[Pull], encounter_ids: Iterable[int]) -> list[Pull]:
+    """The pull each boss was first killed on, after dedupe: the fights whose
+    rankings (spec, DPS, HPS) the enrich step fetches."""
+    deduped = dedupe(pulls)
+    out = []
+    for eid in encounter_ids:
+        counted = progression_pulls(p for p in deduped if p.encounter_id == eid)
+        if counted and counted[-1].kill:
+            out.append(counted[-1])
+    return out
 
 
 def guild_schedule(pulls: Iterable[Pull], encounter_ids: Iterable[int]) -> Schedule:
