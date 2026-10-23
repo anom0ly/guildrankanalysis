@@ -34,7 +34,10 @@
   var $ = function (id) { return document.getElementById(id); };
   var index = null;
   var snap = null;
-  var state = { tier: null, region: "all", boss: null, week: null, hidden: {}, chart: null, metric: "pulls_to_kill" };
+  var VIEWS = ["brackets", "h2h", "peers"];
+  // view: the tab; a and b: Raider.IO guild ids picked in the guild views (a is the peers view's guild).
+  var state = { tier: null, region: "all", boss: null, week: null, hidden: {}, chart: null, metric: "pulls_to_kill",
+                view: "brackets", a: null, b: null };
 
   function num(v) { return Math.abs(v - Math.round(v)) < 0.05 ? String(Math.round(v)) : v.toFixed(1); }
   function pct(v) { return Math.round(v * 100) + "%"; }
@@ -66,6 +69,8 @@
     if (metricInfo(q.get("metric"))) state.metric = q.get("metric");
     if (q.get("week") && !isNaN(+q.get("week"))) state.week = +q.get("week") - 1;
     (q.get("hide") || "").split(",").filter(Boolean).forEach(function (b) { state.hidden[b] = true; });
+    if (VIEWS.indexOf(q.get("view")) >= 0) state.view = q.get("view");
+    ["a", "b"].forEach(function (k) { if (q.get(k) && !isNaN(+q.get(k))) state[k] = +q.get(k); });
   }
   function writeURL() {
     var q = new URLSearchParams();
@@ -76,6 +81,9 @@
     if (state.week !== snap.weeks.length - 1) q.set("week", state.week + 1);
     var hide = Object.keys(state.hidden).filter(function (k) { return state.hidden[k]; });
     if (hide.length) q.set("hide", hide.join(","));
+    if (state.view !== "brackets") q.set("view", state.view);
+    if (state.a !== null) q.set("a", state.a);
+    if (state.b !== null) q.set("b", state.b);
     history.replaceState(null, "", "?" + q.toString());
   }
 
@@ -479,6 +487,18 @@
       $("subtitle").textContent = snap.tier.name + " · Week " + (state.week + 1) + " of tier" +
         (t && t.updated_at ? " · Last refreshed " + fmtDate(t.updated_at) : "");
     }
+    VIEWS.forEach(function (v) { $("tab-" + v).setAttribute("aria-selected", String(v === state.view)); });
+    var brackets = state.view === "brackets";
+    $("content").hidden = !brackets;
+    $("guild-view").hidden = brackets;
+    // Boss and bracket filters only apply to the bracket view; the guild views show every boss.
+    $("boss-field").hidden = !brackets;
+    $("brackets-field").hidden = !brackets;
+    if (!brackets) {
+      window.GuildCompare.render(compareAPI);
+      writeURL();
+      return;
+    }
     renderChips();
     renderCards();
     renderPicker();
@@ -496,6 +516,8 @@
     if (!t || !t.snapshot) {
       snap = null;
       $("content").hidden = true;
+      $("guild-view").hidden = true;
+      $("tabs").hidden = true;
       // Keep the tier picker only when another tier has data to switch to.
       $("filters").hidden = !index.tiers.some(function (x) { return x.snapshot; });
       $("subtitle").textContent = t ? t.name + " · " + tierState(t) : "No data yet";
@@ -505,12 +527,28 @@
       snap = s;
       fillSnapshotControls();
       $("filters").hidden = false;
-      $("content").hidden = false;
+      $("tabs").hidden = false;
       render();
     });
   }
 
+  // What compare.js gets to work with.
+  var compareAPI = {
+    state: state, metrics: METRICS, groups: GROUPS, metricInfo: metricInfo, esc: esc, getJSON: getJSON,
+    get snap() { return snap; },
+    tierEntry: function () { return tierEntry(state.tier); },
+    // End of the picked week in ms, or null for the latest week (everything counts).
+    weekEnd: function () { return state.week === snap.weeks.length - 1 ? null : new Date(snap.weeks[state.week]).getTime(); },
+    changed: render
+  };
+
   function bind() {
+    $("tabs").addEventListener("click", function (e) {
+      var tab = e.target.closest("[data-view]");
+      if (!tab) return;
+      state.view = tab.getAttribute("data-view");
+      render();
+    });
     $("tier").addEventListener("change", function (e) { state.tier = e.target.value; state.week = null; state.chart = null; loadTier(); });
     $("region").addEventListener("change", function (e) { state.region = e.target.value; render(); });
     $("boss").addEventListener("change", function (e) { state.boss = e.target.value; render(); });

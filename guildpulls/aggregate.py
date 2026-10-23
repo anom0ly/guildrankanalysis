@@ -30,6 +30,7 @@ class GuildRow:
     rio_first_defeated: dict[str, str] = field(default_factory=dict)  # by Raider.IO boss slug
     rio_pulls: dict[str, int] = field(default_factory=dict)  # Raider.IO pulls to kill, by boss slug
     schedule: Schedule | None = None  # progression raid nights from the logs
+    realm: str = ""  # Raider.IO realm slug; names alone aren't unique
 
 
 def bracket_of(rank: int | None, brackets=None) -> str | None:

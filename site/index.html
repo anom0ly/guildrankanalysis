@@ -37,7 +37,7 @@
     <label for="tier">Tier</label>
     <select id="tier"></select>
   </div>
-  <div class="field">
+  <div class="field" id="boss-field">
     <label for="boss">Boss</label>
     <select id="boss"></select>
   </div>
@@ -45,11 +45,19 @@
     <label for="week">As of</label>
     <select id="week"></select>
   </div>
-  <div class="field">
+  <div class="field" id="brackets-field">
     <span class="label" id="brackets-label">Rank brackets</span>
     <div class="chips" id="brackets" role="group" aria-labelledby="brackets-label"></div>
   </div>
 </form>
+
+<nav class="tabs" id="tabs" role="tablist" aria-label="Views" hidden>
+  <button type="button" class="tab" role="tab" id="tab-brackets" data-view="brackets" aria-selected="true">By rank bracket</button>
+  <button type="button" class="tab" role="tab" id="tab-h2h" data-view="h2h" aria-selected="false">Head to head</button>
+  <button type="button" class="tab" role="tab" id="tab-peers" data-view="peers" aria-selected="false">Against peers</button>
+</nav>
+
+<main id="guild-view" class="guild-view" hidden></main>
 
 <main id="content" hidden>
   <section class="panel heat-panel">
@@ -114,6 +122,7 @@
       <p><strong>Item level on first pull and gained:</strong> the raid's average item level on its first counted pull of the boss, and how much it rose by the kill.</p>
       <p><strong>Hours and nights per week:</strong> raid nights with a progression pull on any boss (pulls up to each boss's first kill), from the first to the last pull of the night, averaged over the weeks with logs. A guild counts only when its logs cover at least 75% of the weeks between its first and last Raider.IO kill. Only Mythic boss pulls are logged, so trash and Heroic time is left out.</p>
       <p><strong>Brackets:</strong> Raider.IO Mythic world rank for the tier under All, and rank within the region under US or EU, each down to 5000. 1-200 is the Hall of Fame and the baseline for multiples; 1-20 and 21-200 split it. Brackets with no guilds in a region are hidden. Each figure is the bracket median and needs at least 10 guilds. Guilds with fewer than a quarter of the bracket median's pulls are left out as incomplete logs.</p>
+      <p><strong>Head to head and Against peers:</strong> each guild's own numbers, with the same rules as the medians here. Peers are the guilds ranked within 100 places of the picked guild: world rank under All, rank within the region under US or EU. A peer median needs at least 10 peers with the kill, and peers with under a quarter of the median pull count are left out as incomplete logs. The score is the share of those peers the guild did better than. Guilds without public logs have Raider.IO pull counts only.</p>
       <p><strong>As of:</strong> the numbers as they stood at the end of that week of the tier. A kill's numbers never change, so a past week counts only the kills made by then. Ranks are today's.</p>
       <p><strong>Sources:</strong> <a href="https://raider.io">Raider.IO</a> for ranks, kill dates and its pull counts; <a href="https://www.warcraftlogs.com">Warcraft Logs</a> for pulls, nights, time, fight progress, stages and item level.</p>
     </section>
@@ -123,6 +132,7 @@
 
 <footer class="foot" id="foot"></footer>
 </div>
+<script src="compare.js"></script>
 <script src="app.js"></script>
 </body>
 </html>
