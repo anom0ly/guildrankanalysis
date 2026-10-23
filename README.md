@@ -45,8 +45,9 @@ Data goes to `data/guildpulls.sqlite`, snapshots to
    first kill, then count pulls, nights (new night after a gap over 6 h), sum
    combat time, and take the kill pull's average item level.
 6. **Brackets** (`guildpulls/aggregate.py`). Medians over guilds with a logged
-   kill, leaving out incomplete logs (first logged pull was the kill, or pulls
-   under a quarter of the bracket median). A median needs 10 guilds. Lower
+   kill, leaving out incomplete logs (pulls under a quarter of the bracket
+   median). One-shot kills count; the spec's "first logged pull was the kill"
+   rule is available as `EXCLUDE_FIRST_PULL_KILLS` but off. A median needs 10 guilds. Lower
    brackets get a multiple of Top 100 (item level: a difference). Each cell
    also carries the counts behind it and the weekly kill share (from Raider.IO
    first kill dates, so guilds without logs count too).

@@ -50,7 +50,7 @@ def test_medians_of_each_metric():
 def test_exclusions_are_counted():
     members = [guild(i, result(40)) for i in range(1, 11)]
     members += [
-        guild(11, result(1, first_pull_is_kill=True)),     # incomplete: first pull is the kill
+        guild(11, result(1, first_pull_is_kill=True)),     # incomplete: under 1/4 of median
         guild(12, result(9)),                             # incomplete: under 1/4 of median (40)
         guild(13, result(10)),                            # exactly 1/4: kept
         guild(14, None, status="unmatched"),
@@ -91,7 +91,7 @@ def test_tier_weeks_and_weekly_kill_share():
 def test_first_pull_kills_can_be_kept():
     members = [guild(i, result(1, first_pull_is_kill=True)) for i in range(1, 8)]
     members += [guild(7 + i, result(3)) for i in range(1, 5)]
-    assert boss_cell(members, BOSS)["median"]["pulls_to_kill"] is None
-    cell = boss_cell(members, BOSS, exclude_first_pull_kills=False)
+    assert boss_cell(members, BOSS, exclude_first_pull_kills=True)["median"]["pulls_to_kill"] is None
+    cell = boss_cell(members, BOSS)
     assert cell["used"] == 11 and cell["incomplete"] == 0
     assert cell["median"]["pulls_to_kill"] == 1

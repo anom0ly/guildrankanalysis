@@ -89,10 +89,10 @@ DUPLICATE_WINDOW_MS = 5_000
 NIGHT_GAP_HOURS = 6
 MIN_BRACKET_SAMPLE = 10
 LOW_PULL_FRACTION = 0.25
-# Spec rule: a kill on the first logged pull means progression wasn't logged.
-# It also drops genuine one-shots of easy bosses, so it can be switched off and
-# the low-pull rule above left to catch missing logs on harder bosses.
-EXCLUDE_FIRST_PULL_KILLS = True
+# Original spec rule: a kill on the first logged pull means progression wasn't
+# logged. Off (decided 2026-10-23) because it drops genuine one-shots of easy
+# bosses; the low-pull rule above catches missing logs on harder bosses.
+EXCLUDE_FIRST_PULL_KILLS = False
 
 # (label, first rank, last rank). The first bracket is the baseline for multiples.
 BRACKETS: tuple[tuple[str, int, int], ...] = (
