@@ -101,6 +101,23 @@ def test_index_reports_run_progress_and_snapshots(tmp_path):
     assert (tmp_path / TIER.key / "guilds.json").exists()
 
 
+def test_region_top_counts_even_outside_the_world_top():
+    from guildpulls.raiderio import in_scope
+    assert in_scope(5000, 1800, 5000) and in_scope(7000, 4999, 5000)
+    assert not in_scope(7000, 5001, 5000) and not in_scope(5001, None, 5000)
+    store = Store(":memory:")
+    store.replace_rankings(TIER.key, [
+        {"rio_guild_id": 1, "name": "a", "realm": "r", "region": "us", "world_rank": 1, "region_rank": 1,
+         "first_defeated": {}},
+        {"rio_guild_id": 2, "name": "b", "realm": "r", "region": "eu", "world_rank": 6000, "region_rank": 2500,
+         "first_defeated": {}},
+        {"rio_guild_id": 3, "name": "c", "realm": "r", "region": "eu", "world_rank": 9000, "region_rank": 9000,
+         "first_defeated": {}},
+    ], NOW.isoformat())
+    collect(store, FakeWCL(), TIER, "run1", max_rank=5000, now=NOW)
+    assert store.done_in_run(TIER.key, "run1") == {1, 2}
+
+
 def test_raiderio_pulls_parsed_and_stored():
     from guildpulls.raiderio import parse_entry
     entry = {"rank": 7, "regionRank": 3,

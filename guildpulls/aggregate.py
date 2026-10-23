@@ -25,10 +25,10 @@ class GuildRow:
     rio_pulls: dict[str, int] = field(default_factory=dict)  # Raider.IO pulls to kill, by boss slug
 
 
-def bracket_of(rank: int | None) -> str | None:
+def bracket_of(rank: int | None, brackets=None) -> str | None:
     if rank is None:
         return None
-    for label, lo, hi in config.BRACKETS:
+    for label, lo, hi in brackets or config.BRACKETS:
         if lo <= rank <= hi:
             return label
     return None
@@ -120,15 +120,20 @@ def boss_cell(members: list[GuildRow], boss,
     return {"median": medians, **counts}
 
 
-def add_comparisons(cells: dict[str, dict]) -> None:
-    """Multiples of the top bracket; item level as a difference."""
+def add_comparisons(cells: dict[str, dict], base_cell: dict | None = None) -> None:
+    """Multiples of the top bracket; item level as a difference.
+
+    `base_cell` is the baseline when it isn't among `cells` (the slices of the
+    top bracket are compared with the whole bracket).
+    """
     base_label = config.BRACKETS[0][0]
-    base = cells.get(base_label, {}).get("median", {})
+    base_cell = base_cell or cells.get(base_label, {})
+    base = base_cell.get("median", {})
     for label, cell in cells.items():
         comp: dict[str, float | None] = {}
         for m in METRICS:
             v, b = cell["median"][m], base.get(m)
-            if label == base_label or v is None or b is None:
+            if cell is base_cell or v is None or b is None:
                 comp[m] = None
             elif m == "item_level":
                 comp[m] = round(v - b, 2)
@@ -182,14 +187,24 @@ def as_of(g: GuildRow, boss, week_end: datetime) -> GuildRow:
 WEEKLY_KEYS = ("median", "vs_top", "n", "used", "killed", "guilds", "pulls_source")
 
 
-def weekly_cells(by_bracket: dict[str, list[GuildRow]], boss, weeks: list[datetime]) -> dict[str, list[dict]]:
-    """Each bracket's cell at the end of every tier week, cumulative."""
-    out: dict[str, list[dict]] = {label: [] for label in by_bracket}
+def boss_cells(by_bracket: dict[str, list[GuildRow]], by_slice: dict[str, list[GuildRow]], boss,
+               week_end: datetime | None = None) -> dict[str, dict]:
+    """Every bracket and slice cell for one boss, with multiples of the top bracket."""
+    def members_at(members):
+        return members if week_end is None else [as_of(g, boss, week_end) for g in members]
+    cells = {label: boss_cell(members_at(m), boss) for label, m in by_bracket.items()}
+    add_comparisons(cells)
+    slices = {label: boss_cell(members_at(m), boss) for label, m in by_slice.items()}
+    add_comparisons(slices, cells[config.BRACKETS[0][0]])
+    return {**cells, **slices}
+
+
+def weekly_cells(by_bracket: dict[str, list[GuildRow]], by_slice: dict[str, list[GuildRow]], boss,
+                 weeks: list[datetime]) -> dict[str, list[dict]]:
+    """Each bracket's and slice's cell at the end of every tier week, cumulative."""
+    out: dict[str, list[dict]] = {label: [] for label in [*by_bracket, *by_slice]}
     for w in weeks:
-        cells = {label: boss_cell([as_of(g, boss, w) for g in members], boss)
-                 for label, members in by_bracket.items()}
-        add_comparisons(cells)
-        for label, cell in cells.items():
+        for label, cell in boss_cells(by_bracket, by_slice, boss, w).items():
             out[label].append({k: cell[k] for k in WEEKLY_KEYS})
     return out
 
@@ -200,31 +215,38 @@ def build_snapshot(tier: Tier, guilds: list[GuildRow], now: datetime | None = No
     views = {}
     for view in config.REGIONS:
         by_bracket: dict[str, list[GuildRow]] = {label: [] for label, _, _ in config.BRACKETS}
+        by_slice: dict[str, list[GuildRow]] = {label: [] for label, _, _ in config.SLICES}
         for g in guilds:
-            b = bracket_of(view_rank(g, view))
+            rank = view_rank(g, view)
+            b = bracket_of(rank)
             if b:
                 by_bracket[b].append(g)
+            s = bracket_of(rank, config.SLICES)
+            if s:
+                by_slice[s].append(g)
+        groups = {**by_bracket, **by_slice}
         bosses = {}
         for boss in tier.bosses:
-            cells = {label: boss_cell(members, boss) for label, members in by_bracket.items()}
-            add_comparisons(cells)
-            weekly = weekly_cells(by_bracket, boss, weeks)
-            for label, members in by_bracket.items():
+            cells = boss_cells(by_bracket, by_slice, boss)
+            weekly = weekly_cells(by_bracket, by_slice, boss, weeks)
+            for label, members in groups.items():
                 cells[label]["kill_share_weekly"] = weekly_kill_share(members, boss, weeks)
                 cells[label]["weekly"] = weekly[label]
             bosses[boss.rio_slug] = cells
         views[view] = {
-            "bracket_sizes": {label: len(m) for label, m in by_bracket.items()},
+            "bracket_sizes": {label: len(m) for label, m in groups.items()},
             "bosses": bosses,
         }
     return {
-        "schema": 3,
+        "schema": 4,
         "tier": {"key": tier.key, "name": tier.name, "wcl_zone_id": tier.wcl_zone_id,
                  "starts": tier.starts.isoformat()},
         "generated_at": now.isoformat(),
         "bosses": [{"slug": b.rio_slug, "name": b.name, "wcl_encounter_id": b.wcl_encounter_id}
                    for b in tier.bosses],
         "brackets": [{"label": l, "from": lo, "to": hi} for l, lo, hi in config.BRACKETS],
+        "slices": [{"label": l, "from": lo, "to": hi, "parent": config.BRACKETS[0][0]}
+                   for l, lo, hi in config.SLICES],
         "metrics": list(METRICS),
         "weeks": [w.isoformat() for w in weeks],
         "rules": {"min_sample": config.MIN_BRACKET_SAMPLE, "min_pull_seconds": config.MIN_PULL_SECONDS,

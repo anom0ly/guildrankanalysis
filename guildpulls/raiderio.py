@@ -39,9 +39,19 @@ def parse_entry(entry: dict) -> dict:
     }
 
 
+def in_scope(world_rank: int, region_rank: int | None, max_rank: int) -> bool:
+    return world_rank <= max_rank or (region_rank is not None and region_rank <= max_rank)
+
+
 def fetch_rankings(tier: Tier, max_rank: int, session: requests.Session | None = None,
                    sleep: Callable[[float], None] = time.sleep, delay: float = 0.25) -> list[dict]:
-    """Mythic world rankings for the tier, rank 1 through max_rank."""
+    """Mythic world rankings for the tier: every guild in the world top max_rank,
+    plus every guild in its own region's top max_rank.
+
+    Raider.IO's region lists are short (about 1,700 US and 2,400 EU guilds in
+    week 10 of The Venomous Abyss), so the whole world list is read: it has
+    every guild with a region rank, and both ranks on each entry.
+    """
     s = session or requests.Session()
     s.headers.setdefault("User-Agent", USER_AGENT)
     out: list[dict] = []
@@ -53,9 +63,9 @@ def fetch_rankings(tier: Tier, max_rank: int, session: requests.Session | None =
         if not entries:
             break
         for e in entries:
-            if e["rank"] <= max_rank:
+            if in_scope(e["rank"], e.get("regionRank"), max_rank):
                 out.append(parse_entry(e))
-        if entries[-1]["rank"] >= max_rank or len(entries) < PAGE_SIZE:
+        if len(entries) < PAGE_SIZE:
             break
         page += 1
         sleep(delay)

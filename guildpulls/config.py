@@ -80,7 +80,7 @@ TIERS: dict[str, Tier] = {
 }
 CURRENT_TIER = "venomous-abyss"
 
-MAX_RANK = 5000
+MAX_RANK = 5000  # world top 5000, plus each region's top 5000
 MYTHIC = 5
 
 # Metric rules from the spec.
@@ -98,12 +98,24 @@ EXCLUDE_FIRST_PULL_KILLS = False
 # treated as missing nights and Raider.IO's count is used instead.
 RIO_UNDERCOUNT_FRACTION = 0.75
 
-# (label, first rank, last rank). The first bracket is the baseline for multiples.
+# (label, first rank, last rank). The first bracket (Hall of Fame) is the
+# baseline for multiples. Ranks are world rank under All and region rank under
+# US or EU.
 BRACKETS: tuple[tuple[str, int, int], ...] = (
-    ("Top 100", 1, 100),
-    ("101-500", 101, 500),
-    ("501-1000", 501, 1000),
-    ("1001-5000", 1001, 5000),
+    ("1-200", 1, 200),
+    ("201-400", 201, 400),
+    ("401-600", 401, 600),
+    ("601-1000", 601, 1000),
+    ("1001-1200", 1001, 1200),
+    ("1201-1500", 1201, 1500),
+    ("1501-2000", 1501, 2000),
+    ("2001-3000", 2001, 3000),
+    ("3001-5000", 3001, 5000),
+)
+# Slices of the baseline bracket, shown under it and compared with it.
+SLICES: tuple[tuple[str, int, int], ...] = (
+    ("1-20", 1, 20),
+    ("21-200", 21, 200),
 )
 REGIONS = ("all", "us", "eu")
 
