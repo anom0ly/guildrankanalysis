@@ -15,6 +15,7 @@ from guildpulls.store import Store
 def load_guild_rows(store: Store, tier: Tier) -> list[GuildRow]:
     matches = store.matches()
     kills = store.rio_kills(tier.key)
+    rio_pulls = store.rio_pulls(tier.key)
     pulls = store.pulls_by_guild(tier.key)
     encounter_ids = [b.wcl_encounter_id for b in tier.bosses]
     results_cache: dict[int, dict] = {}
@@ -31,7 +32,7 @@ def load_guild_rows(store: Store, tier: Tier) -> list[GuildRow]:
             status = "pending" if rid not in matches and g["region"] in WCL_REGIONS else "unmatched"
             results = {}
         rows.append(GuildRow(rid, g["name"], g["region"], g["world_rank"], g["region_rank"], status,
-                             results, kills.get(rid, {})))
+                             results, kills.get(rid, {}), rio_pulls.get(rid, {})))
     return rows
 
 
@@ -47,7 +48,8 @@ def guild_detail(tier: Tier, rows: list[GuildRow]) -> list[dict]:
                                       "combat_hours": round(r.combat_hours, 3), "item_level": r.item_level,
                                       "first_pull_is_kill": r.first_pull_is_kill}
         out.append({"name": g.name, "region": g.region, "world_rank": g.world_rank,
-                    "region_rank": g.region_rank, "status": g.status, "bosses": bosses})
+                    "region_rank": g.region_rank, "status": g.status, "bosses": bosses,
+                    "rio_pulls": g.rio_pulls})
     return out
 
 

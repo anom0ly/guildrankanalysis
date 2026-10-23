@@ -93,6 +93,10 @@ LOW_PULL_FRACTION = 0.25
 # logged. Off (decided 2026-10-23) because it drops genuine one-shots of easy
 # bosses; the low-pull rule above catches missing logs on harder bosses.
 EXCLUDE_FIRST_PULL_KILLS = False
+# Raider.IO pull counts fill pulls to kill where the logs have no kill. When
+# both exist and WCL is under this share of Raider.IO's count, the logs are
+# treated as missing nights and Raider.IO's count is used instead.
+RIO_UNDERCOUNT_FRACTION = 0.75
 
 # (label, first rank, last rank). The first bracket is the baseline for multiples.
 BRACKETS: tuple[tuple[str, int, int], ...] = (

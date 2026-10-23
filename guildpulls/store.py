@@ -26,6 +26,14 @@ CREATE TABLE IF NOT EXISTS rio_kills (
     first_defeated TEXT NOT NULL,
     PRIMARY KEY (tier, rio_guild_id, boss_slug)
 );
+-- Raider.IO's own pulls-to-kill count per boss (kills only, public pulls only).
+CREATE TABLE IF NOT EXISTS rio_pulls (
+    tier TEXT NOT NULL,
+    rio_guild_id INTEGER NOT NULL,
+    boss_slug TEXT NOT NULL,
+    num_pulls INTEGER NOT NULL,
+    PRIMARY KEY (tier, rio_guild_id, boss_slug)
+);
 -- Raider.IO guild -> WCL guild id. NULL wcl_guild_id means looked up, not found.
 CREATE TABLE IF NOT EXISTS wcl_match (
     rio_guild_id INTEGER PRIMARY KEY,
@@ -96,6 +104,7 @@ class Store:
         with self.db:
             self.db.execute("DELETE FROM guilds WHERE tier = ?", (tier,))
             self.db.execute("DELETE FROM rio_kills WHERE tier = ?", (tier,))
+            self.db.execute("DELETE FROM rio_pulls WHERE tier = ?", (tier,))
             for g in guilds:
                 self.db.execute(
                     "INSERT INTO guilds VALUES (?,?,?,?,?,?,?,?)",
@@ -105,6 +114,10 @@ class Store:
                 self.db.executemany(
                     "INSERT INTO rio_kills VALUES (?,?,?,?)",
                     [(tier, g["rio_guild_id"], slug, ts) for slug, ts in g["first_defeated"].items()],
+                )
+                self.db.executemany(
+                    "INSERT INTO rio_pulls VALUES (?,?,?,?)",
+                    [(tier, g["rio_guild_id"], slug, n) for slug, n in g.get("rio_pulls", {}).items()],
                 )
 
     def guilds(self, tier: str) -> list[sqlite3.Row]:
@@ -116,6 +129,12 @@ class Store:
         out: dict[int, dict[str, str]] = {}
         for r in self.db.execute("SELECT * FROM rio_kills WHERE tier = ?", (tier,)):
             out.setdefault(r["rio_guild_id"], {})[r["boss_slug"]] = r["first_defeated"]
+        return out
+
+    def rio_pulls(self, tier: str) -> dict[int, dict[str, int]]:
+        out: dict[int, dict[str, int]] = {}
+        for r in self.db.execute("SELECT * FROM rio_pulls WHERE tier = ?", (tier,)):
+            out.setdefault(r["rio_guild_id"], {})[r["boss_slug"]] = r["num_pulls"]
         return out
 
     # WCL guild matching
