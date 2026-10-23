@@ -86,11 +86,30 @@
     }
   }
 
+  // How a tier is labelled in the picker: live, final, or how far its
+  // one-time load has got.
+  function tierState(t) {
+    if (t.current) return t.snapshot ? "live" : "first load running";
+    var b = t.backfill;
+    if (t.snapshot) return "final";
+    if (b && b.state === "loading" && b.total) return "loading " + Math.floor(100 * b.done / b.total) + "%";
+    if (b && b.state === "queued") return "queued";
+    return "no data yet";
+  }
+
   function fillTierSelect() {
-    var sel = $("tier");
-    sel.innerHTML = index.tiers.map(function (t) {
-      var label = t.name + (t.current ? " (live)" : "") + (t.snapshot ? "" : " (no data yet)");
-      return '<option value="' + esc(t.key) + '"' + (t.snapshot ? "" : " disabled") + ">" + esc(label) + "</option>";
+    var sel = $("tier"), groups = [], byGroup = {};
+    index.tiers.forEach(function (t) {
+      var g = t.expansion || "";
+      if (!byGroup[g]) { byGroup[g] = []; groups.push(g); }
+      byGroup[g].push(t);
+    });
+    sel.innerHTML = groups.map(function (g) {
+      var opts = byGroup[g].map(function (t) {
+        return '<option value="' + esc(t.key) + '"' + (t.snapshot ? "" : " disabled") + ">" +
+          esc(t.name + " · " + tierState(t)) + "</option>";
+      }).join("");
+      return g ? '<optgroup label="' + esc(g) + '">' + opts + "</optgroup>" : opts;
     }).join("");
     sel.value = state.tier;
   }
@@ -276,8 +295,14 @@
   function render() {
     if (!snap) return;
     var t = tierEntry(state.tier);
-    $("subtitle").textContent = snap.tier.name + " · Week " + (state.week + 1) + " of tier" +
-      (t && t.updated_at ? " · Last refreshed " + fmtDate(t.updated_at) : "");
+    if (t && !t.current) {
+      // A finished tier: its ranks are final and its data doesn't change.
+      $("subtitle").textContent = snap.tier.name + " · Final ranks · Week " + (state.week + 1) +
+        " of " + snap.weeks.length;
+    } else {
+      $("subtitle").textContent = snap.tier.name + " · Week " + (state.week + 1) + " of tier" +
+        (t && t.updated_at ? " · Last refreshed " + fmtDate(t.updated_at) : "");
+    }
     renderChips();
     renderCards();
     renderHeat();
@@ -293,7 +318,7 @@
       $("content").hidden = true;
       // Keep the tier picker only when another tier has data to switch to.
       $("filters").hidden = !index.tiers.some(function (x) { return x.snapshot; });
-      $("subtitle").textContent = t ? t.name + " · No data yet" : "No data yet";
+      $("subtitle").textContent = t ? t.name + " · " + tierState(t) : "No data yet";
       return Promise.resolve();
     }
     return getJSON("data/" + t.snapshot).then(function (s) {

@@ -22,7 +22,8 @@ python -m guildpulls run --limit 50      # first 50 guilds only
 python -m guildpulls run --max-minutes 270   # stop between guilds after 4.5 h
 python -m guildpulls status              # progress of today's run
 python -m guildpulls snapshot            # recompute medians from stored pulls
-python -m guildpulls --tier mn-tier-1 run   # backfill the previous tier
+python -m guildpulls --tier mn-tier-1 run   # load one past tier by hand
+python -m guildpulls backfill --max-minutes 200   # load past tiers with the time left
 pytest
 ```
 
@@ -122,11 +123,35 @@ reports, roughly 1 point per report, so the first full load of 5000 guilds is
 estimated at 100k-250k points, or 6-14 hours. Daily runs after that only fetch
 new reports.
 
+## Past tiers
+
+Past tiers are loaded once, by the daily job, with the time it has left. After
+the current tier's run is complete, `backfill` works through
+`config.BACKFILL_TIERS` in order (VS / DR / MQD, Manaforge Omega, Liberation of
+Undermine, Nerub-ar Palace) under the fixed run id `backfill`, so a tier
+resumes across days until every guild is reached. It stops starting guilds at
+09:00 UTC (`BACKFILL_STOP_HOUR`), and the workflow keeps starting chunks until
+then but never between 09:00 and 10:00. That way the next scheduled run never
+queues behind a backfill chunk, because GitHub keeps only one waiting run per
+concurrency group. Each past tier costs roughly 200k-280k WCL points (11-16
+hours of budget), so a tier takes about a day. `index.json` shows each past
+tier's state (`queued`, `loading` with counts, `complete`), and the tier
+picker shows it too.
+
+WCL archives reports after about two years. Archived reports still return
+their fight list (pulls, kill, timings, item level), which is all the v1
+metrics need, but not event data.
+
 ## Adding a tier
 
 Add a `Tier` to `guildpulls/config.py` with the Raider.IO raid slug, WCL zone
-id, US start time and the boss list mapped by Raider.IO slug to WCL encounter
-id. The zone ids come from `worldData.expansions { zones { id encounters } }`.
+id, US start and end time, expansion name and the boss list mapped by Raider.IO
+slug to WCL encounter id. The zone ids come from
+`worldData.expansions { zones { id encounters } }`; the dates and boss slugs
+from Raider.IO's `raiding/static-data`. For a past tier, add its key to
+`BACKFILL_TIERS`. Raider.IO pull counts are unusable for Vault of the
+Incarnates and older (every boss shows 1 pull); set `rio_pulls=False` on such
+a tier so pulls to kill come from the logs only.
 
 ## Known limits
 

@@ -240,7 +240,8 @@ def build_snapshot(tier: Tier, guilds: list[GuildRow], now: datetime | None = No
     return {
         "schema": 4,
         "tier": {"key": tier.key, "name": tier.name, "wcl_zone_id": tier.wcl_zone_id,
-                 "starts": tier.starts.isoformat()},
+                 "starts": tier.starts.isoformat(), "ends": tier.ends.isoformat() if tier.ends else None,
+                 "rio_pulls": tier.rio_pulls},
         "generated_at": now.isoformat(),
         "bosses": [{"slug": b.rio_slug, "name": b.name, "wcl_encounter_id": b.wcl_encounter_id}
                    for b in tier.bosses],

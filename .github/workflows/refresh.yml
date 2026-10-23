@@ -7,6 +7,11 @@
 # A run that doesn't finish inside one job (the first full load takes 6-14
 # hours; a job may run for 6) stops cleanly between guilds, saves the
 # database, and starts the next chunk of the same run itself.
+#
+# Once the current tier is done, the scheduled run spends the time left on
+# loading past tiers (config.BACKFILL_TIERS), chaining chunks until 09:00 UTC.
+# It never starts a chunk between 09:00 and 10:00, so the next scheduled run
+# is never waiting behind one (GitHub keeps only one waiting run per group).
 name: Refresh data
 
 on:
@@ -108,6 +113,12 @@ jobs:
           run_args=(--run-id "$RUN_ID" --max-minutes "$CHUNK_MINUTES")
           [ -n "$LIMIT" ] && run_args+=(--limit "$LIMIT")
           python -m guildpulls "${args[@]}" run "${run_args[@]}"
+          # Past tiers only on a normal run, not a manual run of one tier or a smoke test.
+          if [ -z "$TIER" ] && [ -z "$LIMIT" ]; then
+            left=$(( CHUNK_MINUTES - SECONDS / 60 ))
+            python -m guildpulls "${args[@]}" backfill --max-minutes "$(( left > 0 ? left : 0 ))" | tee backfill.out
+            grep -m1 '^backfill_pending=' backfill.out >> "$GITHUB_OUTPUT" || true
+          fi
 
       - name: Save pipeline state
         if: always() && hashFiles('data/guildpulls.sqlite') != ''
@@ -134,6 +145,8 @@ jobs:
       - name: Check whether the run finished
         id: result
         if: always() && steps.run.outputs.run_id != ''
+        env:
+          BACKFILL_PENDING: ${{ steps.run.outputs.backfill_pending }}
         run: |
           complete=$(python -c "
           import json
@@ -144,9 +157,18 @@ jobs:
           ")
           echo "complete=$complete" >> "$GITHUB_OUTPUT"
           echo "Run complete: $complete"
+          # Another chunk for past tiers, unless it's 09:xx UTC (the backfill stop hour).
+          backfill=false
+          if [ "$complete" = true ] && [ "$BACKFILL_PENDING" = true ] && [ "$(date -u +%H)" != 09 ]; then
+            backfill=true
+          fi
+          echo "backfill=$backfill" >> "$GITHUB_OUTPUT"
+          echo "More past tiers to load now: $backfill"
 
       - name: Start the next chunk
-        if: steps.run.outcome == 'success' && steps.result.outputs.complete == 'false'
+        if: >-
+          steps.run.outcome == 'success' &&
+          (steps.result.outputs.complete == 'false' || steps.result.outputs.backfill == 'true')
         env:
           CHUNK: ${{ inputs.chunk || '1' }}
           RUN_ID: ${{ steps.run.outputs.run_id }}
@@ -154,6 +176,10 @@ jobs:
           LIMIT: ${{ inputs.limit }}
         run: |
           if [ "$CHUNK" -ge "$MAX_CHUNKS" ]; then
+            if [ "${{ steps.result.outputs.complete }}" = true ]; then
+              echo "Chunk limit reached; past tiers continue after the next scheduled run."
+              exit 0
+            fi
             echo "::error::Run $RUN_ID is still unfinished after $CHUNK chunks; not starting another."
             exit 1
           fi
