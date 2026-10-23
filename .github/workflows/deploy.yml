@@ -1,0 +1,121 @@
+# Publishes the dashboard to GitHub Pages with the latest data, without
+# waiting for a data refresh.
+#
+# Runs on every push to main that changes the site or the export code, by
+# hand, and at the end of each refresh (refresh.yml calls it).
+#
+# site/ gets the latest snapshot from the `data` branch. When a push changes
+# guildpulls/ (so the JSON the site reads may have new fields), the snapshots
+# are first rebuilt from the saved database with `snapshot --all-tiers`: no
+# Raider.IO or WCL calls, a minute or so. A rebuild is only published, never
+# committed to `data`; the next refresh commits its own. Data that has never
+# been fetched can't be rebuilt, so the site shows a note for those panels
+# until the next refresh fills them in.
+name: Deploy site
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "site/**"
+      - "guildpulls/**"
+      - "pyproject.toml"
+      - ".github/workflows/deploy.yml"
+  workflow_dispatch:
+    inputs:
+      rebuild:
+        description: "Rebuild the snapshots from the saved database first"
+        type: boolean
+        default: false
+  workflow_call:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+env:
+  STATE_TAG: pipeline-state
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    # Its own queue, so a site change never waits behind a refresh chunk.
+    concurrency:
+      group: pages
+      cancel-in-progress: false
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Add the published data
+        run: |
+          if git ls-remote --exit-code --heads origin data >/dev/null; then
+            git fetch --depth 1 origin data
+            mkdir -p site/data
+            git archive FETCH_HEAD snapshots | tar -x -C site/data --strip-components=1
+          fi
+
+      - name: Decide whether to rebuild the snapshots
+        id: decide
+        env:
+          EVENT: ${{ github.event_name }}
+          BEFORE: ${{ github.event.before }}
+          REBUILD: ${{ inputs.rebuild }}
+        run: |
+          rebuild=false
+          if [ "$EVENT" = workflow_dispatch ] && [ "$REBUILD" = true ]; then
+            rebuild=true
+          elif [ "$EVENT" = push ]; then
+            # A new branch or a force push has no usable "before"; rebuild to be safe.
+            if ! git cat-file -e "$BEFORE^{commit}" 2>/dev/null \
+               || ! git diff --quiet "$BEFORE" HEAD -- guildpulls pyproject.toml; then
+              rebuild=true
+            fi
+          fi
+          # Halfway through a refresh the database mixes today's guilds with
+          # yesterday's; keep the last finished snapshot until the run ends.
+          if [ "$rebuild" = true ] && [ -f site/data/index.json ] && python -c "
+          import json, sys
+          run = json.load(open('site/data/index.json')).get('run') or {}
+          sys.exit(0 if run and not run.get('complete') else 1)
+          "; then
+            echo "::notice::A data refresh is in progress; deploying the last finished snapshot. New fields appear when it ends."
+            rebuild=false
+          fi
+          echo "rebuild=$rebuild" >> "$GITHUB_OUTPUT"
+          echo "Rebuild snapshots: $rebuild"
+
+      - uses: actions/setup-python@v5
+        if: steps.decide.outputs.rebuild == 'true'
+        with:
+          python-version: "3.12"
+
+      - name: Rebuild the snapshots from the saved database
+        if: steps.decide.outputs.rebuild == 'true'
+        run: |
+          pip install .
+          mkdir -p data
+          if gh release download "$STATE_TAG" --pattern guildpulls.sqlite.gz --dir data; then
+            gunzip -f data/guildpulls.sqlite.gz
+            python -m guildpulls --db data/guildpulls.sqlite --out site/data snapshot --all-tiers
+          else
+            echo "::warning::No saved database yet; deploying the published snapshot as it is."
+          fi
+
+      - run: ls -R site | head -50
+
+      - uses: actions/configure-pages@v5
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+      - id: deployment
+        uses: actions/deploy-pages@v4

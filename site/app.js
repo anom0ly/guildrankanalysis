@@ -508,6 +508,7 @@
   function renderRoster() {
     var el = $("roster");
     var summary = snap.views[state.region].tier_summary;
+    if (!summary) { later("roster"); return; }
     var brackets = visibleBrackets().filter(function (br) { var t = summary[br.label]; return t && t.median.regulars != null; });
     if (!brackets.length) { el.innerHTML = '<p class="none">Not enough guilds have had the second read of their logs yet.</p>'; return; }
     var rows = ROSTER_ROWS.map(function (r) {
@@ -566,6 +567,26 @@
     $("chart").innerHTML = s;
   }
 
+  // The site is deployed on every push, ahead of the data, so a panel can
+  // meet a snapshot from before its fields existed. One such panel shows a
+  // note instead of stopping the rest of the page.
+  var PANELS = [
+    [renderCards, "cards"], [renderPicker, "metric-picker"], [renderHeat, "heat"], [renderChart, "chart"],
+    [renderCurve, "curve"], [renderWipes, "wipes"], [renderGear, "gear"], [renderKillers, "killers"],
+    [renderComp, "comp"], [renderRoster, "roster"]
+  ];
+  var LATER = "This fills in after the next daily data refresh.";
+  function later(id) {
+    var el = $(id);
+    el.innerHTML = el.tagName === "TABLE" ? '<tbody><tr><td class="none">' + LATER + "</td></tr></tbody>" : '<p class="none">' + LATER + "</p>";
+  }
+  function safely(fn, id) {
+    try { fn(); } catch (err) {
+      later(id);
+      if (window.console) console.warn(id + ": " + err.message);
+    }
+  }
+
   function render() {
     if (!snap) return;
     var t = tierEntry(state.tier);
@@ -590,16 +611,7 @@
       return;
     }
     renderChips();
-    renderCards();
-    renderPicker();
-    renderHeat();
-    renderChart();
-    renderCurve();
-    renderWipes();
-    renderGear();
-    renderKillers();
-    renderComp();
-    renderRoster();
+    PANELS.forEach(function (p) { safely(p[0], p[1]); });
     writeURL();
   }
 

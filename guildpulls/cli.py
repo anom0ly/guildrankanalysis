@@ -6,6 +6,7 @@
     python -m guildpulls enrich --max-minutes 200     # second read of the logs: roster, deaths, comp
     python -m guildpulls backfill --max-minutes 200   # load past tiers with the time left
     python -m guildpulls snapshot           # recompute medians from stored pulls
+    python -m guildpulls snapshot --all-tiers   # every tier with a snapshot (the site deploy)
     python -m guildpulls status
 """
 from __future__ import annotations
@@ -42,7 +43,8 @@ def main(argv: list[str] | None = None) -> None:
     en = sub.add_parser("enrich", help="read stored reports again for roster, deaths and comp, until the stop hour")
     en.add_argument("--max-minutes", type=float, help="stop between batches after this long")
 
-    sub.add_parser("snapshot", help="recompute medians from stored pulls")
+    sn = sub.add_parser("snapshot", help="recompute medians from stored pulls")
+    sn.add_argument("--all-tiers", action="store_true", help="every tier that already has a snapshot")
     st = sub.add_parser("status", help="show progress of a run")
     st.add_argument("--run-id")
 
@@ -73,7 +75,9 @@ def main(argv: list[str] | None = None) -> None:
         write_index(store, list(config.TIERS.values()), args.out, config.CURRENT_TIER)
         print(f"enrich_pending={'true' if pending else 'false'}")
     elif args.cmd == "snapshot":
-        print(write_snapshot(store, tier, args.out, now))
+        tiers = [t for t in config.TIERS.values() if store.latest_snapshot(t.key)] if args.all_tiers else [tier]
+        for t in tiers:
+            print(write_snapshot(store, t, args.out, now))
         write_index(store, list(config.TIERS.values()), args.out, tier.key)
     elif args.cmd == "status":
         total = len(store.guilds(tier.key))
