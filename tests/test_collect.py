@@ -103,6 +103,8 @@ def test_index_reports_run_progress_and_snapshots(tmp_path):
     assert idx["run"]["complete"]
     assert idx["tiers"][0]["snapshot"] == f"{TIER.key}/latest.json"
     assert (tmp_path / TIER.key / "guilds.json").exists()
+    assert idx["tiers"][0]["compare"] == f"{TIER.key}/compare.json"
+    assert json.loads((tmp_path / TIER.key / "compare.json").read_text())["guilds"]
 
 
 def test_region_top_counts_even_outside_the_world_top():

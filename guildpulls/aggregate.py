@@ -19,7 +19,8 @@ METRICS = ("pulls_to_kill", "nights_to_kill", "combat_hours", "item_level",
 # Compared with the baseline as a difference rather than a multiple.
 DIFF_METRICS = {"item_level", "first_pull_ilvl", "ilvl_gained", "late_wipe_share", "fast_loss_share",
                 "comp_similarity", "core_coverage"}
-TIER_METRICS = ("hours_per_week", "nights_per_week", "regulars", "core_coverage", "new_per_week")
+SCHEDULE_METRICS = ("hours_per_week", "nights_per_week")
+TIER_METRICS = (*SCHEDULE_METRICS, "regulars", "core_coverage", "new_per_week")
 HEALTH_BANDS = ("75-100", "50-75", "25-50", "0-25")
 
 
@@ -35,6 +36,7 @@ class GuildRow:
     rio_first_defeated: dict[str, str] = field(default_factory=dict)  # by Raider.IO boss slug
     rio_pulls: dict[str, int] = field(default_factory=dict)  # Raider.IO pulls to kill, by boss slug
     schedule: Schedule | None = None  # progression raid nights from the logs
+    realm: str = ""  # Raider.IO realm slug; names alone aren't unique
     roster: Roster | None = None  # None until every progression pull is enriched
     kill_summaries: dict[int, dict] = field(default_factory=dict)  # first kill's DPS, HPS, specs by encounter
 

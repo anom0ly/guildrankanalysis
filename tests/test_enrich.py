@@ -156,7 +156,7 @@ def test_cells_and_tier_summary_use_enriched_numbers(monkeypatch):
     r = boss_result(EID, ps)
     kill = {"raid_dps": 1e6, "raid_hps": 2e5, "specs": {"Mage-Fire": 2}}
     gs = [GuildRow(i, f"g{i}", "us", i, i, "matched", {EID: r}, {BOSS.rio_slug: "2026-09-01T00:00:00Z"},
-                   {}, None, roster(ps, T0), {EID: kill}) for i in (1, 2)]
+                   {}, None, roster=roster(ps, T0), kill_summaries={EID: kill}) for i in (1, 2)]
     cell = boss_cell(gs, BOSS, detail=True, base_specs={"Mage-Fire": 1.0}, killer_ids=[77, VENOM])
     m = cell["median"]
     assert (m["deaths_per_pull"], m["early_deaths_per_pull"], m["avoidable_deaths_per_pull"]) == (2.0, 0.5, 1.0)

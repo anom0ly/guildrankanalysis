@@ -8,6 +8,7 @@ from pathlib import Path
 from guildpulls.aggregate import GuildRow, build_snapshot
 from guildpulls import config
 from guildpulls.collect import WCL_REGIONS
+from guildpulls.compare import compare_file
 from guildpulls.config import Tier
 from guildpulls.metrics import first_kills, guild_results, guild_roster, guild_schedule
 from guildpulls.store import Store
@@ -41,7 +42,8 @@ def load_guild_rows(store: Store, tier: Tier) -> list[GuildRow]:
             status = "pending" if rid not in matches and g["region"] in WCL_REGIONS else "unmatched"
             results, sched, rost, kill_sums = {}, None, None, {}
         rows.append(GuildRow(rid, g["name"], g["region"], g["world_rank"], g["region_rank"], status,
-                             results, kills.get(rid, {}), rio_pulls.get(rid, {}), sched, rost, kill_sums))
+                             results, kills.get(rid, {}), rio_pulls.get(rid, {}), sched, g["realm"],
+                             roster=rost, kill_summaries=kill_sums))
     return rows
 
 
@@ -62,7 +64,7 @@ def guild_detail(tier: Tier, rows: list[GuildRow]) -> list[dict]:
                                       "fast_losses": r.fast_losses, "players_used": r.players_used,
                                       **({"kill": g.kill_summaries[b.wcl_encounter_id]}
                                          if b.wcl_encounter_id in g.kill_summaries else {})}
-        out.append({"name": g.name, "region": g.region, "world_rank": g.world_rank,
+        out.append({"name": g.name, "realm": g.realm, "region": g.region, "world_rank": g.world_rank,
                     "region_rank": g.region_rank, "status": g.status, "bosses": bosses,
                     "rio_pulls": g.rio_pulls,
                     "roster": g.roster.__dict__ if g.roster else None})
@@ -80,6 +82,8 @@ def write_snapshot(store: Store, tier: Tier, out_dir: str | Path, now: datetime 
     path.write_text(json.dumps(snap, separators=(",", ":"), ensure_ascii=False))
     # Per guild detail is a few MB, so only the latest copy is kept.
     (d / "guilds.json").write_text(json.dumps(guild_detail(tier, rows), ensure_ascii=False))
+    # The compact copy the dashboard's guild views load.
+    (d / "compare.json").write_text(json.dumps(compare_file(tier, rows, now), separators=(",", ":"), ensure_ascii=False))
     (d / "latest.json").write_text(json.dumps(snap, separators=(",", ":"), ensure_ascii=False))
     store.record_snapshot(tier.key, day, str(path), now.isoformat())
     return path
@@ -99,6 +103,7 @@ def write_index(store: Store, tiers: list[Tier], out_dir: str | Path, run_tier: 
             "current": tier.ends is None,
             "snapshot": f"{tier.key}/latest.json" if snap else None,
             "guilds": f"{tier.key}/guilds.json" if snap else None,
+            "compare": f"{tier.key}/compare.json" if snap else None,
             "updated_at": snap["created_at"] if snap else None,
             "backfill": backfill_progress(store, tier),
             "enrich": enrich_progress(store, tier),

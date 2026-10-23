@@ -32,7 +32,8 @@ pytest
 
 Data goes to `data/guildpulls.sqlite`, snapshots to
 `data/snapshots/<tier>/<YYYY-MM-DD>.json` (plus `latest.json`, and
-`guilds.json` with each guild's per-boss numbers for spot checks), and
+`guilds.json` with each guild's per-boss numbers for spot checks, and
+`compare.json`, a compact copy of every guild's numbers for the guild views), and
 `data/snapshots/index.json` lists the tiers with data and the latest run's
 progress. A snapshot is only written once a run has reached every guild.
 
@@ -138,7 +139,11 @@ Actions > Refresh data > Run workflow.
   shows its progress instead of numbers.
 - **Week filter.** A kill's numbers never change, so each snapshot carries
   every bracket and boss cell as it stood at the end of each tier week
-  (`weekly`), computed from kill dates. The dashboard only reads `latest.json`.
+  (`weekly`), computed from kill dates. The bracket view only reads `latest.json`.
+- **Guild views.** Head to head and Against peers load the tier's
+  `compare.json` (about 2.5 MB, roughly 450 KB gzipped) the first time either
+  tab opens, then search, pick peers (100 ranks either side, by world rank or
+  region rank) and take medians in the browser.
 
 ### One-time setup
 

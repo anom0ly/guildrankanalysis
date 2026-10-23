@@ -160,6 +160,9 @@ DUPLICATE_WINDOW_MS = 5_000
 NIGHT_GAP_HOURS = 6
 MIN_BRACKET_SAMPLE = 10
 LOW_PULL_FRACTION = 0.25
+# Against peers view: guilds ranked this many places either side (world rank
+# under All, region rank under US or EU). Fixed at 100 (decided 2026-10-23).
+PEER_WINDOW = 100
 # Original spec rule: a kill on the first logged pull means progression wasn't
 # logged. Off (decided 2026-10-23) because it drops genuine one-shots of easy
 # bosses; the low-pull rule above catches missing logs on harder bosses.
