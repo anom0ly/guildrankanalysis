@@ -3,6 +3,7 @@
     python -m guildpulls run                # daily refresh of the current tier
     python -m guildpulls run --limit 50     # first 50 guilds only (smoke test)
     python -m guildpulls run --max-minutes 285   # stop cleanly in time for a CI job limit
+    python -m guildpulls enrich --max-minutes 200     # second read of the logs: roster, deaths, comp
     python -m guildpulls backfill --max-minutes 200   # load past tiers with the time left
     python -m guildpulls snapshot           # recompute medians from stored pulls
     python -m guildpulls status
@@ -38,6 +39,9 @@ def main(argv: list[str] | None = None) -> None:
     bf = sub.add_parser("backfill", help="load past tiers once, oldest unfinished first, until the stop hour")
     bf.add_argument("--max-minutes", type=float, help="stop between guilds after this long")
 
+    en = sub.add_parser("enrich", help="read stored reports again for roster, deaths and comp, until the stop hour")
+    en.add_argument("--max-minutes", type=float, help="stop between batches after this long")
+
     sub.add_parser("snapshot", help="recompute medians from stored pulls")
     st = sub.add_parser("status", help="show progress of a run")
     st.add_argument("--run-id")
@@ -64,6 +68,10 @@ def main(argv: list[str] | None = None) -> None:
         write_index(store, list(config.TIERS.values()), args.out, config.CURRENT_TIER)
         # Read by the workflow to decide whether to start another chunk.
         print(f"backfill_pending={'true' if pending else 'false'}")
+    elif args.cmd == "enrich":
+        pending = enrich_tiers(store, now, args.max_minutes, args.out)
+        write_index(store, list(config.TIERS.values()), args.out, config.CURRENT_TIER)
+        print(f"enrich_pending={'true' if pending else 'false'}")
     elif args.cmd == "snapshot":
         print(write_snapshot(store, tier, args.out, now))
         write_index(store, list(config.TIERS.values()), args.out, tier.key)
@@ -145,3 +153,29 @@ def backfill(store: Store, now: datetime, max_minutes: float | None, out: str, w
         if not run_tier(store, wcl, tier, config.BACKFILL_RUN_ID, datetime.now(timezone.utc), deadline, out):
             break
     return bool(pending_backfill(store))
+
+
+def enrich_tiers(store: Store, now: datetime, max_minutes: float | None, out: str, wcl=None) -> bool:
+    """Run the enrich step on config.ENRICH_TIERS until the backfill stop hour,
+    then rewrite their snapshots. Waits while the current tier's latest run is
+    unfinished. Returns whether any reports are left to read."""
+    from guildpulls.enrich import enrich
+    current = store.latest_run(config.CURRENT_TIER)
+    if current and not current["completed_at"]:
+        logging.info("current tier run %s not finished; enrich waits", current["run_id"])
+        return True
+    deadline = backfill_deadline(now, max_minutes)
+    if deadline is None or deadline - now < timedelta(minutes=10):
+        logging.info("no enrich time left before %02d:00 UTC", config.BACKFILL_STOP_HOUR)
+        return any(store.reports_to_enrich(k) for k in config.ENRICH_TIERS)
+    if wcl is None:
+        from guildpulls.wcl import WCLClient
+        wcl = WCLClient()
+    pending = False
+    for key in config.ENRICH_TIERS:
+        tier = config.TIERS[key]
+        pending |= enrich(store, wcl, tier, deadline)
+        if store.latest_snapshot(key):
+            logging.info("snapshot written to %s", write_snapshot(store, tier, out, datetime.now(timezone.utc)))
+    logging.info("enrich: WCL points used: %.0f", wcl.points_used)
+    return pending

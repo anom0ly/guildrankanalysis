@@ -307,3 +307,14 @@ h2 { margin: 0; font-size: 18px; font-weight: 600; }
   .gsearch { flex-basis: 100%; }
   .swap { margin-top: 0; }
 }
+
+.grid { width: 100%; border-collapse: collapse; font-size: 13px; }
+.grid th, .grid td { padding: 7px 8px; border-bottom: 1px solid var(--border); white-space: nowrap; }
+.grid thead th { font-size: 12px; font-weight: 600; color: var(--muted); text-align: right; }
+.grid thead th .dot { margin-right: 6px; }
+.grid tbody th { text-align: left; font-weight: 500; color: var(--text); }
+.grid td { text-align: right; font-family: "JetBrains Mono", monospace; }
+.grid tr.total th, .grid tr.total td { border-bottom: none; color: var(--muted); }
+.grid td .n { text-align: right; }
+.tag { display: inline-block; margin-left: 6px; padding: 1px 6px; border-radius: 4px; background: var(--warn-bg); color: var(--warn-fg); font-size: 11px; font-weight: 600; }
+.sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }

@@ -9,6 +9,8 @@
   function hours(v) { return v.toFixed(1) + "h"; }
   function ilvl(v) { return v.toFixed(1); }
   function share(v) { return Math.round(v) + "%"; }
+  function rate(v) { return v.toFixed(2); }
+  function big(v) { return v >= 1e6 ? (v / 1e6).toFixed(2) + "M" : Math.round(v / 1e3) + "k"; }
   // diff: compared with 1-200 as a difference (points or item levels) instead of a multiple.
   var METRICS = [
     { key: "pulls_to_kill", group: "Progress", name: "Pulls to kill", hint: "Fewer is faster", fmt: num },
@@ -21,12 +23,23 @@
     { key: "pulls_per_hour", group: "Schedule", name: "Pulls per hour", hint: "Pulls per hour of raid time on the boss. More is faster", fmt: ilvl },
     { key: "item_level", group: "Gear", name: "Item level on kill", hint: "Raid average. Gap shown vs 1-200", fmt: ilvl, diff: true },
     { key: "first_pull_ilvl", group: "Gear", name: "Item level on first pull", hint: "Raid average. Gap shown vs 1-200", fmt: ilvl, diff: true },
-    { key: "ilvl_gained", group: "Gear", name: "Item level gained", hint: "Kill minus first pull. Gap shown vs 1-200", fmt: ilvl, diff: true }
+    { key: "ilvl_gained", group: "Gear", name: "Item level gained", hint: "Kill minus first pull. Gap shown vs 1-200", fmt: ilvl, diff: true },
+    { key: "deaths_per_pull", group: "Deaths", name: "Deaths per pull", hint: "Player deaths per progression pull", fmt: rate },
+    { key: "early_deaths_per_pull", group: "Deaths", name: "Early deaths per pull", hint: "Deaths in the first minute of a pull", fmt: rate },
+    { key: "avoidable_deaths_per_pull", group: "Deaths", name: "Avoidable deaths per pull", hint: "Deaths to the hand-picked avoidable ability", fmt: rate },
+    { key: "fast_loss_share", group: "Deaths", name: "Fast collapses", hint: "Share of wipes over within 90 s of the third death. Gap in points vs 1-200", fmt: share, diff: true },
+    { key: "players_used", group: "Roster", name: "Players used", hint: "Different players across the progression pulls", fmt: num },
+    { key: "raid_dps_on_kill", group: "Throughput", name: "Raid DPS on kill", hint: "Everyone's DPS added up, first kill", fmt: big },
+    { key: "raid_hps_on_kill", group: "Throughput", name: "Healer HPS on kill", hint: "Healers' HPS added up, first kill", fmt: big },
+    { key: "comp_similarity", group: "Throughput", name: "Comp match", hint: "How close the kill's spec mix is to 1-200's average (100% is the same). Gap in points", fmt: share, diff: true }
   ];
-  var GROUPS = ["Progress", "Learning curve", "Wipe depth", "Schedule", "Gear"];
+  var GROUPS = ["Progress", "Learning curve", "Wipe depth", "Schedule", "Gear", "Deaths", "Roster", "Throughput"];
+  var KILL_KEYS = ["raid_dps_on_kill", "raid_hps_on_kill", "comp_similarity"];
+  var DEATH_GROUPS = ["Deaths", "Roster"];
   var TIER_METRICS = [
     { key: "hours_per_week", name: "Hours / week", fmt: function (v) { return v.toFixed(1); } },
-    { key: "nights_per_week", name: "Nights / week", fmt: function (v) { return v.toFixed(1); } }
+    { key: "nights_per_week", name: "Nights / week", fmt: function (v) { return v.toFixed(1); } },
+    { key: "regulars", name: "Players", fmt: num }
   ];
   function metricInfo(key) { return METRICS.filter(function (m) { return m.key === key; })[0]; }
   var REPO = "https://github.com/anom0ly/guildrankanalysis";
@@ -111,6 +124,13 @@
       pill.hidden = false;
       pill.textContent = "Refreshing: " + run.done.toLocaleString() + " of " + run.total.toLocaleString() + " guilds";
     }
+  }
+
+  // The second read of the logs (roster, deaths, comp) fills in over a few days.
+  function enrichNote() {
+    var t = tierEntry(state.tier), e = t && t.enrich;
+    if (!e || !e.total || e.done >= e.total) return "";
+    return " · Deaths and roster: " + Math.floor(100 * e.done / e.total) + "% of logs read";
   }
 
   // How a tier is labelled in the picker: live, final, or how far its
@@ -240,6 +260,10 @@
         var c = cells[i], s = c.pulls_source, used = c.used;
         return esc(b.label) + " " + (used ? pct((s.rio_fill + s.rio_corrected) / used) : "–");
       }).join(" · ");
+    } else if (KILL_KEYS.indexOf(m.key) >= 0) {
+      foot = "From Warcraft Logs rankings of each guild's first kill.";
+    } else if (DEATH_GROUPS.indexOf(m.group) >= 0) {
+      foot = "Logs only. A guild counts once every one of its pulls on the boss has had the second read.";
     } else {
       foot = "Logs only, so the sample is guilds with the kill in public logs.";
     }
@@ -301,7 +325,8 @@
         tiers = TIER_METRICS.map(function (tm, i) {
           var v = t ? t.median[tm.key] : null;
           var mult = br.top || !t ? "" : multText(tm.key, t.vs_top[tm.key]);
-          return '<td class="tiercol' + (i === 0 ? " first" : "") + '" title="Whole tier: n ' + (t ? t.n : 0) + ' guilds">' +
+          var tn = t ? (typeof t.n === "object" ? t.n[tm.key] || 0 : t.n) : 0;
+          return '<td class="tiercol' + (i === 0 ? " first" : "") + '" title="Whole tier: n ' + tn + ' guilds">' +
             (v === null ? "–" : esc(tm.fmt(v)) + (mult ? '<span class="mult">' + mult + "</span>" : "")) + "</td>";
         }).join("");
       }
@@ -431,6 +456,71 @@
       '<span><span class="dot" style="background:var(--muted)"></span>Kill</span><span>+n: item levels gained</span></div>' + s;
   }
 
+  function detailCell(br) { return snap.views[state.region].bosses[state.boss][br.label]; }
+
+  // Columns are brackets, so each table reads across like the heatmap reads down.
+  function bracketTable(brackets, rows, caption) {
+    return '<div class="scroll"><table class="grid"><caption class="sr">' + esc(caption) + "</caption><thead><tr><th scope=\"col\"></th>" +
+      brackets.map(function (br) { return '<th scope="col">' + dot(br) + esc(br.label) + "</th>"; }).join("") + "</tr></thead><tbody>" +
+      rows.join("") + "</tbody></table></div>";
+  }
+
+  function renderKillers() {
+    var el = $("killers");
+    $("killers-title").textContent = bossName() + ": what players die to";
+    var list = (snap.killers || {})[state.boss] || [];
+    var brackets = visibleBrackets().filter(function (br) { return (detailCell(br) || {}).killers; });
+    if (!list.length || !brackets.length) {
+      el.innerHTML = '<p class="none">Not enough guilds have had the second read of their logs on this boss yet.</p>'; return;
+    }
+    var rows = list.map(function (a) {
+      return '<tr><th scope="row">' + (a.name ? esc(a.name) : "Ability " + a.id) + (a.avoidable ? ' <span class="tag">avoidable</span>' : "") + "</th>" +
+        brackets.map(function (br) { var v = detailCell(br).killers.per_pull[String(a.id)]; return "<td>" + (v === undefined ? "–" : rate(v)) + "</td>"; }).join("") + "</tr>";
+    });
+    rows.push('<tr class="total"><th scope="row">All deaths</th>' + brackets.map(function (br) {
+      var k = detailCell(br).killers; return "<td>" + rate(k.all_per_pull) + '<span class="n">n ' + k.n + "</span></td>";
+    }).join("") + "</tr>");
+    el.innerHTML = bracketTable(brackets, rows, "Deaths per pull by killing ability and rank bracket");
+  }
+
+  function renderComp() {
+    var el = $("comp");
+    $("comp-title").textContent = bossName() + ": raid comp on the kill";
+    var brackets = visibleBrackets().filter(function (br) { return (detailCell(br) || {}).specs; });
+    if (!brackets.length) { el.innerHTML = '<p class="none">Not enough first kills have rankings on this boss yet.</p>'; return; }
+    // Specs in the order the first bracket shown uses them most.
+    var specs = Object.keys(detailCell(brackets[0]).specs.mean).slice(0, 15);
+    var rows = specs.map(function (k) {
+      return '<tr><th scope="row">' + esc(k.replace("-", " ").replace(/([a-z])([A-Z])/g, "$1 $2")) + "</th>" + brackets.map(function (br) {
+        var v = detailCell(br).specs.mean[k]; return "<td>" + (v ? v.toFixed(1) : "–") + "</td>";
+      }).join("") + "</tr>";
+    });
+    rows.push('<tr class="total"><th scope="row">Kills</th>' + brackets.map(function (br) { return "<td>" + detailCell(br).specs.n + "</td>"; }).join("") + "</tr>");
+    el.innerHTML = bracketTable(brackets, rows, "Average players of each spec on the first kill, per rank bracket");
+  }
+
+  var ROSTER_ROWS = [
+    { key: "regulars", name: "Regular players", fmt: num },
+    { key: "core_coverage", name: "Pulls with the core 16 of 20", fmt: share },
+    { key: "new_per_week", name: "New regulars per week", fmt: function (v) { return v.toFixed(1); } }
+  ];
+
+  function renderRoster() {
+    var el = $("roster");
+    var summary = snap.views[state.region].tier_summary;
+    var brackets = visibleBrackets().filter(function (br) { var t = summary[br.label]; return t && t.median.regulars != null; });
+    if (!brackets.length) { el.innerHTML = '<p class="none">Not enough guilds have had the second read of their logs yet.</p>'; return; }
+    var rows = ROSTER_ROWS.map(function (r) {
+      return '<tr><th scope="row">' + esc(r.name) + "</th>" + brackets.map(function (br) {
+        var v = summary[br.label].median[r.key]; return "<td>" + (v === null || v === undefined ? "–" : esc(r.fmt(v))) + "</td>";
+      }).join("") + "</tr>";
+    });
+    rows.push('<tr class="total"><th scope="row">Guilds</th>' + brackets.map(function (br) {
+      return "<td>" + (summary[br.label].n.regulars || 0) + "</td>";
+    }).join("") + "</tr>");
+    el.innerHTML = bracketTable(brackets, rows, "Roster stability medians per rank bracket, whole tier");
+  }
+
   function renderChart() {
     var bossName = snap.bosses.filter(function (b) { return b.slug === state.boss; })[0].name;
     $("chart-title").textContent = bossName + " kills over the tier";
@@ -485,7 +575,7 @@
         " of " + snap.weeks.length;
     } else {
       $("subtitle").textContent = snap.tier.name + " · Week " + (state.week + 1) + " of tier" +
-        (t && t.updated_at ? " · Last refreshed " + fmtDate(t.updated_at) : "");
+        (t && t.updated_at ? " · Last refreshed " + fmtDate(t.updated_at) : "") + enrichNote();
     }
     VIEWS.forEach(function (v) { $("tab-" + v).setAttribute("aria-selected", String(v === state.view)); });
     var brackets = state.view === "brackets";
@@ -507,6 +597,9 @@
     renderCurve();
     renderWipes();
     renderGear();
+    renderKillers();
+    renderComp();
+    renderRoster();
     writeURL();
   }
 

@@ -2,7 +2,8 @@
 
 Compares Mythic raid progression between higher and lower ranked guilds:
 pulls to kill, raid nights to kill, time on boss, learning curve, wipe depth,
-raid schedule and item level (on the first pull and on the kill), as
+raid schedule, item level (on the first pull and on the kill), deaths,
+roster stability and raid comp and throughput on the first kill, as
 bracket medians for 1-200 (Hall of Fame, also split into 1-20 and 21-200) /
 201-400 / 401-600 / 601-1000 / 1001-1200 / 1201-1500 / 1501-2000 / 2001-3000 /
 3001-5000, under All, US and EU. The rules follow the metric spec
@@ -24,6 +25,7 @@ python -m guildpulls run --max-minutes 270   # stop between guilds after 4.5 h
 python -m guildpulls status              # progress of today's run
 python -m guildpulls snapshot            # recompute medians from stored pulls
 python -m guildpulls --tier mn-tier-1 run   # load one past tier by hand
+python -m guildpulls enrich --max-minutes 200     # second read: roster, deaths, comp
 python -m guildpulls backfill --max-minutes 200   # load past tiers with the time left
 pytest
 ```
@@ -88,6 +90,34 @@ cp -r data/snapshots site/data && python -m http.server -d site 8000
    gets a tier summary of hours and nights per week, from guilds whose logs
    cover at least 75% of the weeks their Raider.IO kills span. Stage names
    come from one `report.phases` lookup per boss.
+
+## Second read: roster, deaths and comp
+
+`enrich` (`guildpulls/enrich.py`) reads every stored report of the current
+tier (`config.ENRICH_TIERS`) once more, best-ranked guild first, and stores
+per pull: the players in it, its deaths, early deaths (first 60 s), the time
+of the third death and deaths per killing ability, plus WCL's exact
+`fightPercentage` for pulls stored before it was fetched. It then fetches
+WCL rankings for each guild's first kill of each boss (every player's class,
+spec and DPS, and the healers' HPS). Per boss that gives deaths, early deaths
+and avoidable deaths per pull (the hand-picked list in
+`config.AVOIDABLE_ABILITIES`), the share of wipes that collapsed within 90 s
+of the third death, players used, raid DPS and HPS on the kill, and how close
+the kill's spec mix is to 1-200's average (cosine similarity). Per tier:
+regular players (3+ progression pulls), the share of pulls with 16 of the
+guild's 20 most-used players, and new regulars per week. A guild counts in
+these only once all its counted pulls on the boss have been read, so a half
+read guild never reads low.
+
+Deaths come from death events (about 10 points a report). The Deaths table
+is cheaper but stops at 200 deaths a report. WCL takes 2-20 s to first open a
+report's events, so 8 queries run at once (`ENRICH_WORKERS`). A report that
+the daily run fetches again (it grew) is read again. About 48k reports of
+the tier have boss pulls, so the first read is about 500k points (about 28
+hours of budget, so a few days); after that only new reports are read. In
+the workflow it runs after the daily refresh and before past tiers, stops at
+09:00 UTC like the backfill, and prints `enrich_pending=` so the workflow can
+chain chunks. `index.json` carries its progress per tier.
 
 ## Hosting: GitHub Actions and Pages
 

@@ -10,7 +10,7 @@ from __future__ import annotations
 from datetime import datetime
 
 from guildpulls import config
-from guildpulls.aggregate import METRICS, TIER_METRICS, Entry, GuildRow, boss_entry, guild_schedule_numbers, kill_time
+from guildpulls.aggregate import METRICS, SCHEDULE_METRICS, Entry, GuildRow, boss_entry, guild_schedule_numbers, kill_time
 from guildpulls.config import Tier
 
 SCHEMA = 1
@@ -44,7 +44,7 @@ def guild_record(tier: Tier, g: GuildRow) -> list:
     return [
         g.rio_guild_id, g.name, g.realm, g.region, g.world_rank, g.region_rank, STATUSES.index(g.status),
         [boss_record(g, b) for b in tier.bosses],
-        [round(sched[m], 2) for m in TIER_METRICS] if sched else None,
+        [round(sched[m], 2) for m in SCHEDULE_METRICS] if sched else None,
     ]
 
 
@@ -55,7 +55,7 @@ def compare_file(tier: Tier, rows: list[GuildRow], now: datetime) -> dict:
         "generated_at": now.isoformat(),
         "bosses": [b.rio_slug for b in tier.bosses],
         "metrics": list(METRICS),
-        "tier_metrics": list(TIER_METRICS),
+        "tier_metrics": list(SCHEDULE_METRICS),
         "sources": list(SOURCES),
         "statuses": list(STATUSES),
         "low_pull_fraction": config.LOW_PULL_FRACTION,

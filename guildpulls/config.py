@@ -180,6 +180,34 @@ LOW_WIPE_HEALTH = 30  # late wipe on bosses whose phases don't show progress
 # Raider.IO kills span, or hours per week would read low.
 SCHEDULE_MIN_WEEK_COVERAGE = 0.75
 
+# Roster, deaths and kill comp come from a second read of each report (the
+# enrich step), done for these tiers only: older logs are archived, and WCL
+# then refuses the event data deaths need.
+ENRICH_TIERS = ("venomous-abyss",)
+ENRICH_REPORTS_PER_QUERY = 2  # reports per aliased query (fights, players and death events)
+# Queries in flight at once: WCL takes 2-20 s to first open a report's events.
+ENRICH_WORKERS = 8
+RANKINGS_REPORTS_PER_QUERY = 5  # first-kill rankings (spec, DPS, HPS) per aliased query
+# Deaths.
+EARLY_DEATH_SECONDS = 60  # a death this soon after the pull started is an early death
+FAST_LOSS_SECONDS = 90  # a wipe this soon after the third death is a pull lost fast
+# Hand-picked avoidable deaths (Justin, 2026-10-23), by WCL encounter id: killing ability ids.
+AVOIDABLE_ABILITIES: dict[int, frozenset[int]] = {
+    3445: frozenset({1284209}),  # Entombed Sentinels: Living Venom
+    3497: frozenset({1305844}),  # The Lost Explorers: Blast Wave
+    3455: frozenset({1295798}),  # Vashnik the Malignant: Plague Wave
+    3420: frozenset({1287083}),  # Sszorak: Tempest
+    3421: frozenset({1308386}),  # The Twin Fangs: Visceral Burst
+    3429: frozenset({1285017}),  # The Coiled Altar: Axegrinder
+    3492: frozenset({1292403}),  # Ula'tek: Caustic Waves
+}
+TOP_KILLERS = 8  # killing abilities per boss shown on the boss detail view
+# Roster.
+CORE_SIZE = 20  # a guild's core: its most-used players
+CORE_PRESENT = 16  # a pull "has the core" with at least this many of them
+FILL_IN_PULLS = 3  # players in fewer progression pulls than this are fill-ins
+SETTLE_WEEKS = 2  # new players are counted from the guild's third logged week
+
 # (label, first rank, last rank). The first bracket (Hall of Fame) is the
 # baseline for multiples. Ranks are world rank under All and region rank under
 # US or EU.
