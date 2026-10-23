@@ -1,15 +1,15 @@
 {
  "schema": 1,
- "generated_at": "2026-10-23T07:25:46.525908+00:00",
+ "generated_at": "2026-10-23T10:59:45.982989+00:00",
  "tiers": [
   {
    "key": "venomous-abyss",
    "name": "The Venomous Abyss",
    "starts": "2026-08-18T15:00:00+00:00",
    "current": true,
-   "snapshot": null,
-   "guilds": null,
-   "updated_at": null
+   "snapshot": "venomous-abyss/latest.json",
+   "guilds": "venomous-abyss/guilds.json",
+   "updated_at": "2026-10-23T07:30:18.270835+00:00"
   },
   {
    "key": "mn-tier-1",
@@ -25,9 +25,9 @@
   "tier": "venomous-abyss",
   "run_id": "2026-10-23",
   "started_at": "2026-10-23T02:55:45.530450+00:00",
-  "completed_at": null,
-  "complete": false,
-  "done": 2139,
+  "completed_at": "2026-10-23T10:59:37.400323+00:00",
+  "complete": true,
+  "done": 5000,
   "total": 5000
  }
 }
