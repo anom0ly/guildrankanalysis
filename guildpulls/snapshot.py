@@ -61,8 +61,38 @@ def write_snapshot(store: Store, tier: Tier, out_dir: str | Path, now: datetime 
     d = Path(out_dir) / tier.key
     d.mkdir(parents=True, exist_ok=True)
     path = d / f"{day}.json"
-    path.write_text(json.dumps(snap, indent=1, ensure_ascii=False))
-    (d / f"{day}-guilds.json").write_text(json.dumps(guild_detail(tier, rows), ensure_ascii=False))
-    (d / "latest.json").write_text(json.dumps(snap, indent=1, ensure_ascii=False))
+    path.write_text(json.dumps(snap, separators=(",", ":"), ensure_ascii=False))
+    # Per guild detail is a few MB, so only the latest copy is kept.
+    (d / "guilds.json").write_text(json.dumps(guild_detail(tier, rows), ensure_ascii=False))
+    (d / "latest.json").write_text(json.dumps(snap, separators=(",", ":"), ensure_ascii=False))
     store.record_snapshot(tier.key, day, str(path), now.isoformat())
+    return path
+
+
+def write_index(store: Store, tiers: list[Tier], out_dir: str | Path, run_tier: str,
+                now: datetime | None = None) -> Path:
+    """The file the dashboard reads first: which tiers have data, and the
+    progress of the latest run of `run_tier`."""
+    now = now or datetime.now(timezone.utc)
+    out = {"schema": 1, "generated_at": now.isoformat(), "tiers": [], "run": None}
+    for tier in tiers:
+        snap = store.latest_snapshot(tier.key)
+        out["tiers"].append({
+            "key": tier.key, "name": tier.name, "starts": tier.starts.isoformat(),
+            "current": tier.ends is None,
+            "snapshot": f"{tier.key}/latest.json" if snap else None,
+            "guilds": f"{tier.key}/guilds.json" if snap else None,
+            "updated_at": snap["created_at"] if snap else None,
+        })
+    row = store.latest_run(run_tier)
+    if row:
+        counts = store.run_status_counts(run_tier, row["run_id"])
+        out["run"] = {
+            "tier": run_tier, "run_id": row["run_id"], "started_at": row["started_at"],
+            "completed_at": row["completed_at"], "complete": row["completed_at"] is not None,
+            "done": sum(counts.values()), "total": len(store.guilds(run_tier)),
+        }
+    path = Path(out_dir) / "index.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(out, indent=1, ensure_ascii=False))
     return path

@@ -1,0 +1,190 @@
+# Daily data refresh and dashboard deploy.
+#
+# The pipeline's SQLite database is kept between runs as an asset on the
+# `pipeline-state` release. Snapshots are committed to the `data` branch and
+# published to GitHub Pages together with site/.
+#
+# A run that doesn't finish inside one job (the first full load takes 6-14
+# hours; a job may run for 6) stops cleanly between guilds, saves the
+# database, and starts the next chunk of the same run itself.
+name: Refresh data
+
+on:
+  schedule:
+    - cron: "0 10 * * *"
+  workflow_dispatch:
+    inputs:
+      run_id:
+        description: "Run id to resume (blank: today's UTC date)"
+        required: false
+        default: ""
+      tier:
+        description: "Tier key (blank: current tier)"
+        required: false
+        default: ""
+      limit:
+        description: "Process at most this many guilds (blank: all)"
+        required: false
+        default: ""
+      chunk:
+        description: "Chunk number of this run (set by the workflow itself)"
+        required: false
+        default: "1"
+
+permissions:
+  contents: write   # data branch and the pipeline-state release
+  actions: write    # start the next chunk
+  pages: write
+  id-token: write
+
+concurrency:
+  group: refresh
+  cancel-in-progress: false
+
+env:
+  STATE_TAG: pipeline-state
+  # Stop starting new guilds after this long. The WCL budget pause can add up
+  # to an hour on top, which still leaves time to save before the 6 h limit.
+  CHUNK_MINUTES: "270"
+  MAX_CHUNKS: "5"
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    outputs:
+      complete: ${{ steps.result.outputs.complete }}
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - run: pip install .
+
+      - name: Check out the data branch
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if git ls-remote --exit-code --heads origin data >/dev/null; then
+            git fetch --depth 1 origin data
+            git worktree add published FETCH_HEAD
+            git -C published switch -c data
+          else
+            git worktree add --orphan -b data published
+          fi
+          mkdir -p published/snapshots
+
+      - name: Restore pipeline state
+        run: |
+          mkdir -p data
+          if gh release download "$STATE_TAG" --pattern guildpulls.sqlite.gz --dir data; then
+            gunzip -f data/guildpulls.sqlite.gz
+            ls -lh data/guildpulls.sqlite
+          else
+            echo "No saved state yet; starting from an empty database."
+          fi
+
+      - name: Run the pipeline
+        id: run
+        env:
+          WCL_CLIENT_ID: ${{ secrets.WCL_CLIENT_ID }}
+          WCL_CLIENT_SECRET: ${{ secrets.WCL_CLIENT_SECRET }}
+          RUN_ID: ${{ inputs.run_id }}
+          TIER: ${{ inputs.tier }}
+          LIMIT: ${{ inputs.limit }}
+        run: |
+          if [ -z "$WCL_CLIENT_ID" ] || [ -z "$WCL_CLIENT_SECRET" ]; then
+            echo "::error::Add WCL_CLIENT_ID and WCL_CLIENT_SECRET under Settings > Secrets and variables > Actions."
+            exit 1
+          fi
+          RUN_ID="${RUN_ID:-$(date -u +%F)}"
+          echo "run_id=$RUN_ID" >> "$GITHUB_OUTPUT"
+          args=(--db data/guildpulls.sqlite --out published/snapshots)
+          [ -n "$TIER" ] && args+=(--tier "$TIER")
+          run_args=(--run-id "$RUN_ID" --max-minutes "$CHUNK_MINUTES")
+          [ -n "$LIMIT" ] && run_args+=(--limit "$LIMIT")
+          python -m guildpulls "${args[@]}" run "${run_args[@]}"
+
+      - name: Save pipeline state
+        if: always() && hashFiles('data/guildpulls.sqlite') != ''
+        run: |
+          gzip -kf data/guildpulls.sqlite
+          if ! gh release view "$STATE_TAG" >/dev/null 2>&1; then
+            gh release create "$STATE_TAG" --title "Pipeline state" --latest=false \
+              --notes "Working database for the daily refresh workflow. Replaced on every run; not a release."
+          fi
+          gh release upload "$STATE_TAG" data/guildpulls.sqlite.gz --clobber
+
+      - name: Commit snapshots
+        if: always() && steps.run.outputs.run_id != ''
+        run: |
+          cd published
+          git add -A
+          if git diff --cached --quiet; then
+            echo "No snapshot changes."
+          else
+            git commit -q -m "Data refresh ${{ steps.run.outputs.run_id }} (chunk ${{ inputs.chunk || '1' }})"
+            git push origin data
+          fi
+
+      - name: Check whether the run finished
+        id: result
+        if: always() && steps.run.outputs.run_id != ''
+        run: |
+          complete=$(python -c "
+          import json
+          try:
+              print(str(json.load(open('published/snapshots/index.json'))['run']['complete']).lower())
+          except Exception:
+              print('false')
+          ")
+          echo "complete=$complete" >> "$GITHUB_OUTPUT"
+          echo "Run complete: $complete"
+
+      - name: Start the next chunk
+        if: steps.run.outcome == 'success' && steps.result.outputs.complete == 'false'
+        env:
+          CHUNK: ${{ inputs.chunk || '1' }}
+          RUN_ID: ${{ steps.run.outputs.run_id }}
+          TIER: ${{ inputs.tier }}
+          LIMIT: ${{ inputs.limit }}
+        run: |
+          if [ "$CHUNK" -ge "$MAX_CHUNKS" ]; then
+            echo "::error::Run $RUN_ID is still unfinished after $CHUNK chunks; not starting another."
+            exit 1
+          fi
+          gh workflow run refresh.yml --ref "$GITHUB_REF_NAME" \
+            -f run_id="$RUN_ID" -f tier="$TIER" -f limit="$LIMIT" -f chunk="$((CHUNK + 1))"
+          echo "Started chunk $((CHUNK + 1)) of run $RUN_ID."
+
+  deploy:
+    needs: refresh
+    if: always() && needs.refresh.result != 'cancelled'
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Add the published data
+        run: |
+          if git ls-remote --exit-code --heads origin data >/dev/null; then
+            git fetch --depth 1 origin data
+            mkdir -p site/data
+            git archive FETCH_HEAD snapshots | tar -x -C site/data --strip-components=1
+          fi
+          ls -R site | head -50
+
+      - uses: actions/configure-pages@v5
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+      - id: deployment
+        uses: actions/deploy-pages@v4

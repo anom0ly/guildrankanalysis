@@ -147,3 +147,18 @@ def test_cell_mixes_sources_and_counts_samples_per_metric():
     assert c["median"]["pulls_to_kill"] == 100
     assert c["median"]["nights_to_kill"] is None  # only 6 guilds have nights
     assert (c["unmatched"], c["kill_not_logged"], c["no_pull_data"]) == (3, 1, 0)
+
+
+def test_weekly_cells_only_count_kills_made_by_that_week():
+    early = [guild(i, result(10), killed_at="2026-08-20T00:00:00Z") for i in range(1, 11)]
+    late = [guild(i, result(40), killed_at="2026-09-03T00:00:00Z") for i in range(11, 21)]
+    # A logged kill with no Raider.IO date falls back to the log's kill time.
+    wcl_only = guild(21, BossResult(BOSS.wcl_encounter_id, True, 40, 2, 3_600_000, 700.0,
+                                    int(datetime(2026, 9, 3, tzinfo=timezone.utc).timestamp() * 1000), False),
+                     killed_at=None)
+    cell = build_snapshot(TIER, early + late + [wcl_only], NOW)["views"]["all"]["bosses"][BOSS.rio_slug]["Top 100"]
+    w1, w3 = cell["weekly"][0], cell["weekly"][2]
+    assert w1["used"] == 10 and w1["median"]["pulls_to_kill"] == 10 and w1["guilds"] == 21
+    assert w3["used"] == 21 and w3["median"]["pulls_to_kill"] == 40
+    assert cell["weekly"][-1]["median"] == cell["median"]
+    assert len(cell["weekly"]) == len(tier_weeks(TIER, NOW))

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime, timedelta, timezone
+from typing import Callable
 
 from guildpulls import config, raiderio
 from guildpulls.config import Tier
@@ -79,8 +80,14 @@ def refresh_rankings(store: Store, tier: Tier, max_rank: int, now: datetime, **k
 
 
 def collect(store: Store, wcl: WCLClient, tier: Tier, run_id: str, max_rank: int = config.MAX_RANK,
-            limit: int | None = None, now: datetime | None = None) -> dict[str, int]:
-    """Fetch new Mythic pulls for every ranked guild not yet done in this run."""
+            limit: int | None = None, now: datetime | None = None, deadline: datetime | None = None,
+            clock: Callable[[], datetime] = lambda: datetime.now(timezone.utc)) -> bool:
+    """Fetch new Mythic pulls for every ranked guild not yet done in this run.
+
+    Returns False when the deadline stopped it early, else True (a --limit
+    smoke run counts as finished). Stopping between guilds keeps the run
+    resumable with the same run id.
+    """
     now = now or datetime.now(timezone.utc)
     done = store.done_in_run(tier.key, run_id)
     kills = store.rio_kills(tier.key)
@@ -90,6 +97,9 @@ def collect(store: Store, wcl: WCLClient, tier: Tier, run_id: str, max_rank: int
     log.info("%d guilds to process (%d already done in run %s)", len(todo), len(done), run_id)
 
     for n, g in enumerate(todo, 1):
+        if deadline is not None and clock() >= deadline:
+            log.info("deadline reached after %d of %d guilds; resume with run id %s", n - 1, len(todo), run_id)
+            return False
         try:
             status = _collect_guild(store, wcl, tier, g, kills.get(g["rio_guild_id"], {}), now)
         except WCLError as e:
@@ -99,7 +109,7 @@ def collect(store: Store, wcl: WCLClient, tier: Tier, run_id: str, max_rank: int
             store.mark_done(tier.key, g["rio_guild_id"], run_id, status)
         if n % 25 == 0:
             log.info("%d/%d guilds, WCL points left this hour: %.0f", n, len(todo), wcl.rate.remaining)
-    return store.run_status_counts(tier.key, run_id)
+    return True
 
 
 def _collect_guild(store: Store, wcl: WCLClient, tier: Tier, g, first_defeated: dict, now: datetime) -> str:
