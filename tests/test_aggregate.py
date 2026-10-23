@@ -48,7 +48,8 @@ def test_median_needs_ten_guilds():
 def test_medians_of_each_metric():
     members = [guild(i, result(100 + i, nights=i, hours=i / 2, ilvl=690 + i)) for i in range(1, 12)]
     m = boss_cell(members, BOSS)["median"]
-    assert m == {"pulls_to_kill": 106, "nights_to_kill": 6, "combat_hours": 3.0, "item_level": 696}
+    assert {k: m[k] for k in ("pulls_to_kill", "nights_to_kill", "combat_hours", "item_level")} == \
+        {"pulls_to_kill": 106, "nights_to_kill": 6, "combat_hours": 3.0, "item_level": 696}
 
 
 def test_exclusions_are_counted():
@@ -115,8 +116,9 @@ def test_first_pull_kills_can_be_kept():
 
 
 def test_wcl_used_when_logs_have_the_kill():
-    e = boss_entry(guild(1, result(100, nights=4, hours=6, ilvl=705), rio=110), BOSS, False)
-    assert e == Entry(100, "wcl", 4, 6.0, 705)
+    r = result(100, nights=4, hours=6, ilvl=705)
+    e = boss_entry(guild(1, r, rio=110), BOSS, False)
+    assert e == Entry(100, "wcl", 4, 6.0, 705, r)
 
 
 def test_wcl_higher_than_rio_still_uses_wcl():
@@ -158,7 +160,8 @@ def test_cell_mixes_sources_and_counts_samples_per_metric():
     c = boss_cell(members, BOSS)
     assert c["pulls_source"] == {"wcl": 6, "rio_fill": 3, "rio_corrected": 1}
     assert c["incomplete"] == 1  # 2 pulls is under a quarter of the median
-    assert c["n"] == {"pulls_to_kill": 10, "nights_to_kill": 6, "combat_hours": 6, "item_level": 7}
+    assert {k: c["n"][k] for k in ("pulls_to_kill", "nights_to_kill", "combat_hours", "item_level")} == \
+        {"pulls_to_kill": 10, "nights_to_kill": 6, "combat_hours": 6, "item_level": 7}
     assert c["median"]["pulls_to_kill"] == 100
     assert c["median"]["nights_to_kill"] is None  # only 6 guilds have nights
     assert (c["unmatched"], c["kill_not_logged"], c["no_pull_data"]) == (3, 1, 0)

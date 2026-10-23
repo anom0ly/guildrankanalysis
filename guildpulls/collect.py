@@ -79,6 +79,31 @@ def refresh_rankings(store: Store, tier: Tier, max_rank: int, now: datetime, **k
     return len(guilds)
 
 
+def fetch_phase_names(store: Store, wcl: WCLClient, tier: Tier) -> int:
+    """Look up phase names for bosses that don't have them yet: one small
+    query per boss, from any stored report with a pull of it. Bosses WCL has
+    no phases for are looked up again next run, which costs about a point."""
+    known = store.phases()
+    done = 0
+    for b in tier.bosses:
+        if b.wcl_encounter_id in known:
+            continue
+        code = store.report_with_encounter(tier.key, b.wcl_encounter_id)
+        if code is None:
+            continue
+        try:
+            found = wcl.encounter_phases(code)
+        except WCLError as e:
+            log.warning("phase names for %s: %s", b.name, e)
+            continue
+        for eid, phases in found.items():
+            if eid not in known and phases:
+                store.save_phases(eid, phases)
+                known[eid] = phases
+                done += 1
+    return done
+
+
 def collect(store: Store, wcl: WCLClient, tier: Tier, run_id: str, max_rank: int = config.MAX_RANK,
             limit: int | None = None, now: datetime | None = None, deadline: datetime | None = None,
             clock: Callable[[], datetime] = lambda: datetime.now(timezone.utc)) -> bool:
@@ -96,6 +121,7 @@ def collect(store: Store, wcl: WCLClient, tier: Tier, run_id: str, max_rank: int
     if limit is not None:
         todo = todo[:limit]
     log.info("%d guilds to process (%d already done in run %s)", len(todo), len(done), run_id)
+    fetch_phase_names(store, wcl, tier)
 
     for n, g in enumerate(todo, 1):
         if deadline is not None and clock() >= deadline:

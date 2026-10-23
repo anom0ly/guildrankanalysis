@@ -65,6 +65,7 @@ CREATE TABLE IF NOT EXISTS pulls (
     item_level REAL,
     boss_percentage REAL,
     last_phase INTEGER,
+    fight_percentage REAL,
     PRIMARY KEY (tier, report_code, fight_id)
 );
 CREATE INDEX IF NOT EXISTS pulls_guild ON pulls (tier, wcl_guild_id);
@@ -84,6 +85,14 @@ CREATE TABLE IF NOT EXISTS runs (
     completed_at TEXT,
     PRIMARY KEY (tier, run_id)
 );
+-- Phase names per boss from WCL's encounter metadata (shared by every tier).
+CREATE TABLE IF NOT EXISTS encounter_phases (
+    encounter_id INTEGER NOT NULL,
+    phase_id INTEGER NOT NULL,
+    name TEXT NOT NULL,
+    is_intermission INTEGER NOT NULL,
+    PRIMARY KEY (encounter_id, phase_id)
+);
 CREATE TABLE IF NOT EXISTS snapshots (
     tier TEXT NOT NULL,
     day TEXT NOT NULL,
@@ -102,6 +111,14 @@ class Store:
         self.db = sqlite3.connect(self.path)
         self.db.row_factory = sqlite3.Row
         self.db.executescript(SCHEMA)
+        self._migrate()
+
+    def _migrate(self) -> None:
+        """Columns added after the first load, for databases created before them."""
+        cols = {r[1] for r in self.db.execute("PRAGMA table_info(pulls)")}
+        if "fight_percentage" not in cols:
+            with self.db:
+                self.db.execute("ALTER TABLE pulls ADD COLUMN fight_percentage REAL")
 
     def close(self) -> None:
         self.db.close()
@@ -172,9 +189,10 @@ class Store:
         with self.db:
             self.db.execute("DELETE FROM pulls WHERE tier = ? AND report_code = ?", (tier, code))
             self.db.executemany(
-                "INSERT INTO pulls VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+                "INSERT INTO pulls (tier, report_code, fight_id, wcl_guild_id, encounter_id, start_ms, end_ms, "
+                "kill, item_level, boss_percentage, last_phase, fight_percentage) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
                 [(tier, code, p.fight_id, wcl_guild_id, p.encounter_id, p.start_ms, p.end_ms,
-                  int(p.kill), p.item_level, p.boss_percentage, p.last_phase) for p in pulls],
+                  int(p.kill), p.item_level, p.boss_percentage, p.last_phase, p.fight_percentage) for p in pulls],
             )
             self.db.execute(
                 "INSERT OR REPLACE INTO reports VALUES (?,?,?,?,?,?)",
@@ -188,8 +206,31 @@ class Store:
                 encounter_id=r["encounter_id"], start_ms=r["start_ms"], end_ms=r["end_ms"],
                 kill=bool(r["kill"]), item_level=r["item_level"], boss_percentage=r["boss_percentage"],
                 last_phase=r["last_phase"], report_code=r["report_code"], fight_id=r["fight_id"],
+                fight_percentage=r["fight_percentage"],
             ))
         return out
+
+    def report_with_encounter(self, tier: str, encounter_id: int) -> str | None:
+        row = self.db.execute(
+            "SELECT report_code FROM pulls WHERE tier = ? AND encounter_id = ? LIMIT 1", (tier, encounter_id)
+        ).fetchone()
+        return row[0] if row else None
+
+    # Phase names
+    def phases(self) -> dict[int, list[dict]]:
+        out: dict[int, list[dict]] = {}
+        for r in self.db.execute("SELECT * FROM encounter_phases ORDER BY encounter_id, phase_id"):
+            out.setdefault(r["encounter_id"], []).append(
+                {"id": r["phase_id"], "name": r["name"], "intermission": bool(r["is_intermission"])})
+        return out
+
+    def save_phases(self, encounter_id: int, phases: Iterable[dict]) -> None:
+        with self.db:
+            self.db.execute("DELETE FROM encounter_phases WHERE encounter_id = ?", (encounter_id,))
+            self.db.executemany(
+                "INSERT INTO encounter_phases VALUES (?,?,?,?)",
+                [(encounter_id, p["id"], p["name"], int(p["intermission"])) for p in phases],
+            )
 
     # Resumable progress
     def done_in_run(self, tier: str, run_id: str) -> set[int]:

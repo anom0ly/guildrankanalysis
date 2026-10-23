@@ -23,7 +23,7 @@ API_URL = "https://www.warcraftlogs.com/api/v2/client"
 RATE_FIELDS = "rateLimitData { limitPerHour pointsSpentThisHour pointsResetIn }"
 FIGHT_FIELDS = (
     "fights(difficulty: %d, killType: Encounters) "
-    "{ id encounterID startTime endTime kill averageItemLevel bossPercentage lastPhase }" % config.MYTHIC
+    "{ id encounterID startTime endTime kill averageItemLevel bossPercentage fightPercentage lastPhase }" % config.MYTHIC
 )
 
 log = logging.getLogger(__name__)
@@ -176,6 +176,16 @@ class WCLClient:
         return out
 
 
+    def encounter_phases(self, code: str) -> dict[int, list[dict]]:
+        """Phase names of every encounter in a report (about 1 point)."""
+        data = self.query(f'reportData {{ report(code: "{_safe_code(code)}") '
+                          "{ phases { encounterID phases { id name isIntermission } } } }")
+        rep = data["reportData"]["report"] or {}
+        return {e["encounterID"]: [{"id": p["id"], "name": p["name"], "intermission": bool(p.get("isIntermission"))}
+                                   for p in e.get("phases") or []]
+                for e in rep.get("phases") or []}
+
+
 def parse_fights(code: str, report: dict) -> list[Pull]:
     base = int(report["startTime"])
     return [
@@ -187,6 +197,7 @@ def parse_fights(code: str, report: dict) -> list[Pull]:
             item_level=f.get("averageItemLevel") or None,
             boss_percentage=f.get("bossPercentage"),
             last_phase=f.get("lastPhase"),
+            fight_percentage=f.get("fightPercentage"),
             report_code=code,
             fight_id=f["id"],
         )

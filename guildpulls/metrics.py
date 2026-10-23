@@ -5,6 +5,9 @@ Rules (from the metric spec):
 - Pulls shorter than 10 s are resets and are ignored for every metric.
 - Only pulls up to and including the first kill count.
 - A new raid night starts after a gap of more than 6 hours between pulls.
+
+Learning curve, wipe depth and gear at first pull come from the same counted
+pulls. The raid schedule is per guild across every boss (see `schedule`).
 """
 from __future__ import annotations
 
@@ -25,6 +28,9 @@ class Pull:
     last_phase: int | None = None
     report_code: str = ""
     fight_id: int = 0
+    # WCL's fightPercentage: progress through the whole fight, across phases.
+    # Stored from 23 Oct 2026; older pulls estimate it (see fight_left).
+    fight_percentage: float | None = None
 
     @property
     def duration_ms(self) -> int:
@@ -41,6 +47,18 @@ class BossResult:
     item_level: float | None  # average item level on the kill pull
     first_kill_ms: int | None
     first_pull_is_kill: bool  # spec's "incomplete" signal: progression wasn't logged
+    # Learning curve: best boss health % reached so far, after each counted pull.
+    best_curve: tuple[float, ...] = ()
+    pulls_to_sub10: int | None = None  # pull number of the first pull under 10% (a kill counts)
+    longest_plateau: int = 0  # most pulls in a row without a new best (by at least 1 point)
+    # Wipe depth: wipes by the phase they ended in, and wipes at 30% boss health or lower.
+    wipes_by_phase: tuple[tuple[int, int], ...] = ()
+    wipe_bands: tuple[int, int, int, int] = (0, 0, 0, 0)  # wipes at 75-100, 50-75, 25-50, 0-25% health
+    wipes: int = 0
+    low_wipes: int = 0
+    kill_phase: int | None = None
+    first_pull_ilvl: float | None = None
+    boss_hours: float = 0.0  # raid time spent on this boss: first to last pull of it, per night
 
     @property
     def combat_hours(self) -> float:
@@ -107,12 +125,89 @@ def progression_pulls(pulls: Iterable[Pull], min_seconds: int = config.MIN_PULL_
     return out
 
 
+def split_nights(pulls: list[Pull], gap_hours: float = config.NIGHT_GAP_HOURS) -> list[list[Pull]]:
+    """Pulls in start order, grouped into raid nights."""
+    gap_ms = gap_hours * 3_600_000
+    nights: list[list[Pull]] = []
+    for p in sorted(pulls, key=lambda p: p.start_ms):
+        if nights and p.start_ms - nights[-1][-1].start_ms <= gap_ms:
+            nights[-1].append(p)
+        else:
+            nights.append([p])
+    return nights
+
+
+def night_hours(night: list[Pull]) -> float:
+    return (max(p.end_ms for p in night) - night[0].start_ms) / 3_600_000
+
+
+def _clamp(v: float) -> float:
+    return min(100.0, max(0.0, v))
+
+
+def fight_left(p: Pull, stages: int) -> float:
+    """How much of the fight was left when the pull ended, 0 on a kill.
+
+    WCL's fightPercentage when stored. Otherwise an estimate from the stage
+    (lastPhase counts stages, not intermissions) and boss health, giving each
+    of the `stages` stages an equal share. Boss health resets between stages
+    on many bosses, so health alone would call a stage-one wipe at 15% close.
+    WCL can report health over 100 on multi-boss encounters, so it is capped.
+    """
+    if p.kill:
+        return 0.0
+    if p.fight_percentage is not None:
+        return _clamp(p.fight_percentage)
+    health = _clamp(p.boss_percentage if p.boss_percentage is not None else 100.0)
+    stage = p.last_phase or 0
+    if stages <= 1 or stage < 1 or stage > stages:
+        return health
+    return _clamp(((stages - stage) * 100 + health) / stages)
+
+
+def boss_stages(counted: list[Pull]) -> int:
+    """Stages the guild has to get through: the stage of its kill, or the
+    furthest stage reached. Bosses that cycle back to stage one (kill in
+    stage 1) come out as 1, which leaves boss health as the measure."""
+    kill = counted[-1] if counted and counted[-1].kill else None
+    if kill is not None:
+        return kill.last_phase or 0
+    return max((p.last_phase or 0) for p in counted) if counted else 0
+
+
+def learning_curve(counted: list[Pull], step: float = config.PLATEAU_STEP) -> tuple[tuple[float, ...], int | None, int]:
+    """Best fight progress so far after each pull (% of the fight left), the
+    first sub-10% pull, and the longest run of pulls that didn't beat the
+    best by at least `step` points."""
+    stages = boss_stages(counted)
+    best, curve, sub10 = 100.0, [], None
+    run = longest = 0
+    for i, p in enumerate(counted, 1):
+        h = fight_left(p, stages)
+        if h <= best - step or (p.kill and best > 0):
+            best, run = h, 0
+        else:
+            best = min(best, h)
+            run += 1
+            longest = max(longest, run)
+        curve.append(round(best, 1))
+        if sub10 is None and h < config.SUB10_HEALTH:
+            sub10 = i
+    return tuple(curve), sub10, longest
+
+
 def boss_result(encounter_id: int, pulls: Iterable[Pull]) -> BossResult | None:
     """Metrics for one guild on one boss from that guild's deduped pulls."""
     counted = progression_pulls(p for p in pulls if p.encounter_id == encounter_id)
     if not counted:
         return None
     kill = counted[-1] if counted[-1].kill else None
+    curve, sub10, plateau = learning_curve(counted)
+    wipes = [p for p in counted if not p.kill]
+    by_phase: dict[int, int] = {}
+    for p in wipes:
+        ph = p.last_phase or 0
+        by_phase[ph] = by_phase.get(ph, 0) + 1
     return BossResult(
         encounter_id=encounter_id,
         killed=kill is not None,
@@ -122,7 +217,41 @@ def boss_result(encounter_id: int, pulls: Iterable[Pull]) -> BossResult | None:
         item_level=kill.item_level if kill else None,
         first_kill_ms=kill.start_ms if kill else None,
         first_pull_is_kill=kill is not None and len(counted) == 1,
+        best_curve=curve,
+        pulls_to_sub10=sub10,
+        longest_plateau=plateau,
+        wipes_by_phase=tuple(sorted(by_phase.items())),
+        wipe_bands=_bands(wipes, boss_stages(counted)),
+        wipes=len(wipes),
+        low_wipes=sum(1 for p in wipes if fight_left(p, 1) <= config.LOW_WIPE_HEALTH),
+        kill_phase=(kill.last_phase or 0) if kill else None,
+        first_pull_ilvl=counted[0].item_level,
+        boss_hours=sum(night_hours(n) for n in split_nights(counted)),
     )
+
+
+def _bands(wipes: list[Pull], stages: int) -> tuple[int, int, int, int]:
+    out = [0, 0, 0, 0]
+    for p in wipes:
+        out[min(3, int((100 - fight_left(p, stages)) // 25))] += 1
+    return tuple(out)
+
+
+@dataclass(frozen=True)
+class Schedule:
+    """A guild's progression raid nights across every boss."""
+    nights: tuple[tuple[int, int], ...]  # (first pull start, last pull end) in ms
+
+    @property
+    def hours(self) -> float:
+        return sum(b - a for a, b in self.nights) / 3_600_000
+
+
+def schedule(counted_by_boss: Iterable[list[Pull]]) -> Schedule:
+    """Raid nights from the counted pulls of every boss: all pulls up to each
+    boss's first kill. Farm after a kill is outside the logs we read anyway."""
+    allp = [p for ps in counted_by_boss for p in ps]
+    return Schedule(tuple((n[0].start_ms, max(p.end_ms for p in n)) for n in split_nights(allp)))
 
 
 def guild_results(pulls: Iterable[Pull], encounter_ids: Iterable[int]) -> dict[int, BossResult]:
@@ -134,3 +263,8 @@ def guild_results(pulls: Iterable[Pull], encounter_ids: Iterable[int]) -> dict[i
         if r is not None:
             results[eid] = r
     return results
+
+
+def guild_schedule(pulls: Iterable[Pull], encounter_ids: Iterable[int]) -> Schedule:
+    deduped = dedupe(pulls)
+    return schedule(progression_pulls(p for p in deduped if p.encounter_id == eid) for eid in encounter_ids)

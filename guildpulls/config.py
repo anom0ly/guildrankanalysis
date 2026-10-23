@@ -169,6 +169,14 @@ EXCLUDE_FIRST_PULL_KILLS = False
 # treated as missing nights and Raider.IO's count is used instead.
 RIO_UNDERCOUNT_FRACTION = 0.75
 
+# Learning curve and wipe depth.
+SUB10_HEALTH = 10  # "close to a kill": a pull that ended under this boss health %
+PLATEAU_STEP = 1.0  # a pull ends a plateau when it beats the best health by this many points
+LOW_WIPE_HEALTH = 30  # late wipe on bosses whose phases don't show progress
+# Raid schedule: a guild needs logged nights in this share of the weeks its
+# Raider.IO kills span, or hours per week would read low.
+SCHEDULE_MIN_WEEK_COVERAGE = 0.75
+
 # (label, first rank, last rank). The first bracket (Hall of Fame) is the
 # baseline for multiples. Ranks are world rank under All and region rank under
 # US or EU.
