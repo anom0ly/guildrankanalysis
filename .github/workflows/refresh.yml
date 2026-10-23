@@ -1,8 +1,9 @@
-# Daily data refresh and dashboard deploy.
+# Daily data refresh.
 #
 # The pipeline's SQLite database is kept between runs as an asset on the
-# `pipeline-state` release. Snapshots are committed to the `data` branch and
-# published to GitHub Pages together with site/.
+# `pipeline-state` release. Snapshots are committed to the `data` branch, and
+# each chunk ends by publishing the site with them (deploy.yml, which also
+# runs on its own when the site changes).
 #
 # A run that doesn't finish inside one job (the first full load takes 6-14
 # hours; a job may run for 6) stops cleanly between guilds, saves the
@@ -197,27 +198,4 @@ jobs:
   deploy:
     needs: refresh
     if: always() && needs.refresh.result != 'cancelled'
-    runs-on: ubuntu-latest
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Add the published data
-        run: |
-          if git ls-remote --exit-code --heads origin data >/dev/null; then
-            git fetch --depth 1 origin data
-            mkdir -p site/data
-            git archive FETCH_HEAD snapshots | tar -x -C site/data --strip-components=1
-          fi
-          ls -R site | head -50
-
-      - uses: actions/configure-pages@v5
-
-      - uses: actions/upload-pages-artifact@v3
-        with:
-          path: site
-
-      - id: deployment
-        uses: actions/deploy-pages@v4
+    uses: ./.github/workflows/deploy.yml

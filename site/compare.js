@@ -395,7 +395,10 @@
     api = a;
     var el = $("guild-view"), t = api.tierEntry();
     if (!t || !t.compare) {
-      el.innerHTML = '<section class="panel"><p class="none">This tier has no guild data yet.</p></section>';
+      // The site can be deployed ahead of the data: an older snapshot has no compare file yet.
+      el.innerHTML = '<section class="panel"><p class="none">' + (t && t.snapshot
+        ? "These views fill in after the next daily data refresh."
+        : "This tier has no guild data yet.") + "</p></section>";
       return;
     }
     var key = t.key, view = api.state.view;

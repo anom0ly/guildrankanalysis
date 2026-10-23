@@ -134,8 +134,17 @@ Actions > Refresh data > Run workflow.
   load fit in one chunk.
 - **Data.** Snapshots and `index.json` are committed to the `data` branch
   (bot commits stay off `main`).
-- **Site.** The deploy job publishes `site/` with the `data` branch's
-  snapshots under `site/data/`. Until the first load finishes, the page
+- **Site.** `.github/workflows/deploy.yml` publishes `site/` with the `data`
+  branch's snapshots under `site/data/`. It runs at the end of every refresh
+  chunk and also on its own on each push to `main` that touches `site/` or
+  `guildpulls/`, so UI changes go live in a minute or two without a refresh.
+  When a push changes `guildpulls/`, it first rebuilds the snapshots from the
+  saved database (`snapshot --all-tiers`, no API calls) so new fields computed
+  from stored data show up right away; the rebuild is published but not
+  committed, and it's skipped while a refresh is part way through. A panel
+  whose fields need data that hasn't been fetched yet shows "fills in after
+  the next daily data refresh" instead. Run it by hand from Actions > Deploy
+  site (tick "rebuild" to recompute). Until the first load finishes, the page
   shows its progress instead of numbers.
 - **Week filter.** A kill's numbers never change, so each snapshot carries
   every bracket and boss cell as it stood at the end of each tier week
