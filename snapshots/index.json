@@ -1,6 +1,6 @@
 {
  "schema": 1,
- "generated_at": "2026-10-23T18:25:45.160824+00:00",
+ "generated_at": "2026-10-23T22:56:51.558419+00:00",
  "tiers": [
   {
    "key": "venomous-abyss",
@@ -11,6 +11,7 @@
    "current": true,
    "snapshot": "venomous-abyss/latest.json",
    "guilds": "venomous-abyss/guilds.json",
+   "compare": "venomous-abyss/compare.json",
    "updated_at": "2026-10-23T07:30:18.270835+00:00",
    "backfill": null
   },
@@ -23,10 +24,11 @@
    "current": false,
    "snapshot": null,
    "guilds": null,
+   "compare": null,
    "updated_at": null,
    "backfill": {
     "state": "loading",
-    "done": 1351,
+    "done": 2898,
     "total": 9566
    }
   },
@@ -39,6 +41,7 @@
    "current": false,
    "snapshot": null,
    "guilds": null,
+   "compare": null,
    "updated_at": null,
    "backfill": {
     "state": "queued",
@@ -55,6 +58,7 @@
    "current": false,
    "snapshot": null,
    "guilds": null,
+   "compare": null,
    "updated_at": null,
    "backfill": {
     "state": "queued",
@@ -71,6 +75,7 @@
    "current": false,
    "snapshot": null,
    "guilds": null,
+   "compare": null,
    "updated_at": null,
    "backfill": {
     "state": "queued",
