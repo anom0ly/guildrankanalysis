@@ -1,0 +1,12 @@
+[project]
+name = "guildpulls"
+version = "0.1.0"
+description = "Mythic raid pull metrics by guild rank bracket, from Raider.IO and Warcraft Logs"
+requires-python = ">=3.11"
+dependencies = ["requests>=2.31"]
+
+[project.optional-dependencies]
+dev = ["pytest>=8"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
