@@ -2,8 +2,9 @@
 
 Compares Mythic raid progression between higher and lower ranked guilds:
 pulls to kill, raid nights to kill, time on boss and item level on kill, as
-bracket medians for Top 100 / 101-500 / 501-1000 / 1001-5000, under All, US
-and EU. The rules follow the metric spec
+bracket medians for 1-200 (Hall of Fame, also split into 1-20 and 21-200) /
+201-400 / 401-600 / 601-1000 / 1001-1200 / 1201-1500 / 1501-2000 / 2001-3000 /
+3001-5000, under All, US and EU. The rules follow the metric spec
 (https://claude.ai/artifact/F8BfVJ7vtZjbpkbsnmZpX6).
 
 This repo holds the data pipeline, the dashboard (`site/`), and the GitHub
@@ -40,9 +41,12 @@ cp -r data/snapshots site/data && python -m http.server -d site 8000
 
 ## How a run works
 
-1. **Ranks.** Raider.IO `raiding/raid-rankings` (Mythic, world) down to rank
-   5000: guild, realm, region, world rank, region rank, first kill date and
-   Raider.IO's pull count per boss.
+1. **Ranks.** Raider.IO `raiding/raid-rankings` (Mythic, world), the whole
+   list: every guild in the world top 5000 or in its region's top 5000, with
+   realm, region, world rank, region rank, first kill dates and Raider.IO's
+   pull count per boss. Raider.IO's region lists are short (in week 10 of The
+   Venomous Abyss about 1,660 US and 2,380 EU guilds, 5,584 worldwide), so
+   reading the world list to its end covers each region's top 5000.
 2. **Match.** Each guild is looked up on WCL with
    `guildData.guild(name, serverSlug, serverRegion)`. Matches are cached; a
    miss is retried after 7 days. CN guilds are skipped (no WCL API coverage).
@@ -64,7 +68,8 @@ cp -r data/snapshots site/data && python -m http.server -d site 8000
    Nights, combat time and item level are WCL only. Guilds under a quarter of
    the bracket median are left out as incomplete. One-shot kills count; the spec's "first logged pull was the kill"
    rule is available as `EXCLUDE_FIRST_PULL_KILLS` but off. A median needs 10 guilds. Lower
-   brackets get a multiple of Top 100 (item level: a difference). Each cell
+   brackets and the 1-20 and 21-200 slices get a multiple of 1-200 (item level:
+   a difference). Each cell
    also carries the counts behind it and the weekly kill share (from Raider.IO
    first kill dates, so guilds without logs count too).
 
@@ -125,8 +130,8 @@ id. The zone ids come from `worldData.expansions { zones { id encounters } }`.
 
 ## Known limits
 
-- Region views use region rank among the world top 5000, so the US and EU
-  1001-5000 brackets are only partly filled.
+- Region views only fill as far as Raider.IO's region lists go; brackets with
+  no guilds in a region are hidden on the dashboard.
 - Guilds whose logs are private, or missing the kill, are counted in
   `kill_not_logged`. Their pulls to kill can come from Raider.IO, but they are
   left out of nights, combat time and item level. Each cell's `n` gives the

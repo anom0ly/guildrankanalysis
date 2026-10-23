@@ -23,10 +23,12 @@ def guild(rank, r=None, region="us", region_rank=None, status="matched", killed_
 
 
 def test_brackets():
-    assert bracket_of(1) == "Top 100" and bracket_of(100) == "Top 100"
-    assert bracket_of(101) == "101-500" and bracket_of(500) == "101-500"
-    assert bracket_of(1000) == "501-1000" and bracket_of(5000) == "1001-5000"
+    assert bracket_of(1) == "1-200" and bracket_of(200) == "1-200"
+    assert bracket_of(201) == "201-400" and bracket_of(1000) == "601-1000"
+    assert bracket_of(1201) == "1201-1500" and bracket_of(5000) == "3001-5000"
     assert bracket_of(5001) is None and bracket_of(None) is None
+    assert bracket_of(20, config.SLICES) == "1-20" and bracket_of(21, config.SLICES) == "21-200"
+    assert bracket_of(201, config.SLICES) is None
 
 
 def test_region_view_uses_region_rank():
@@ -67,17 +69,30 @@ def test_exclusions_are_counted():
 
 
 def test_snapshot_multiples_and_item_level_difference():
-    guilds = [guild(i, result(10, nights=2, hours=1, ilvl=710)) for i in range(1, 101)]
-    guilds += [guild(100 + i, result(23, nights=5, hours=3, ilvl=706.2)) for i in range(1, 21)]
+    guilds = [guild(i, result(10, nights=2, hours=1, ilvl=710)) for i in range(1, 201)]
+    guilds += [guild(200 + i, result(23, nights=5, hours=3, ilvl=706.2)) for i in range(1, 21)]
     snap = build_snapshot(TIER, guilds, NOW)
     cells = snap["views"]["all"]["bosses"][BOSS.rio_slug]
-    assert cells["Top 100"]["vs_top"]["pulls_to_kill"] is None
-    vs = cells["101-500"]["vs_top"]
+    assert cells["1-200"]["vs_top"]["pulls_to_kill"] is None
+    vs = cells["201-400"]["vs_top"]
     assert vs["pulls_to_kill"] == 2.3 and vs["nights_to_kill"] == 2.5 and vs["combat_hours"] == 3.0
     assert vs["item_level"] == -3.8
-    assert cells["501-1000"]["median"]["pulls_to_kill"] is None
-    assert snap["views"]["us"]["bracket_sizes"]["Top 100"] == 100
-    assert snap["views"]["eu"]["bracket_sizes"]["Top 100"] == 0
+    assert cells["401-600"]["median"]["pulls_to_kill"] is None
+    assert snap["views"]["us"]["bracket_sizes"]["1-200"] == 200
+    assert snap["views"]["eu"]["bracket_sizes"]["1-200"] == 0
+
+
+def test_slices_are_compared_with_the_whole_top_bracket():
+    guilds = [guild(i, result(20)) for i in range(1, 21)]
+    guilds += [guild(i, result(10)) for i in range(21, 201)]
+    snap = build_snapshot(TIER, guilds, NOW)
+    cells = snap["views"]["all"]["bosses"][BOSS.rio_slug]
+    assert cells["1-200"]["median"]["pulls_to_kill"] == 10
+    assert cells["1-20"]["median"]["pulls_to_kill"] == 20 and cells["1-20"]["vs_top"]["pulls_to_kill"] == 2.0
+    assert cells["21-200"]["vs_top"]["pulls_to_kill"] == 1.0
+    assert cells["1-20"]["weekly"][-1]["vs_top"] == cells["1-20"]["vs_top"]
+    assert snap["views"]["all"]["bracket_sizes"]["1-20"] == 20
+    assert [s["label"] for s in snap["slices"]] == ["1-20", "21-200"]
 
 
 def test_tier_weeks_and_weekly_kill_share():
@@ -86,7 +101,7 @@ def test_tier_weeks_and_weekly_kill_share():
     assert weeks[-1] == NOW and len(weeks) == 10
     guilds = [guild(1, killed_at="2026-08-20T00:00:00Z"), guild(2, killed_at="2026-09-03T00:00:00Z"),
               guild(3, killed_at=None), guild(4, killed_at=None)]
-    share = build_snapshot(TIER, guilds, NOW)["views"]["all"]["bosses"][BOSS.rio_slug]["Top 100"]["kill_share_weekly"]
+    share = build_snapshot(TIER, guilds, NOW)["views"]["all"]["bosses"][BOSS.rio_slug]["1-200"]["kill_share_weekly"]
     assert share[:3] == [0.25, 0.25, 0.5] and share[-1] == 0.5
 
 
@@ -156,7 +171,7 @@ def test_weekly_cells_only_count_kills_made_by_that_week():
     wcl_only = guild(21, BossResult(BOSS.wcl_encounter_id, True, 40, 2, 3_600_000, 700.0,
                                     int(datetime(2026, 9, 3, tzinfo=timezone.utc).timestamp() * 1000), False),
                      killed_at=None)
-    cell = build_snapshot(TIER, early + late + [wcl_only], NOW)["views"]["all"]["bosses"][BOSS.rio_slug]["Top 100"]
+    cell = build_snapshot(TIER, early + late + [wcl_only], NOW)["views"]["all"]["bosses"][BOSS.rio_slug]["1-200"]
     w1, w3 = cell["weekly"][0], cell["weekly"][2]
     assert w1["used"] == 10 and w1["median"]["pulls_to_kill"] == 10 and w1["guilds"] == 21
     assert w3["used"] == 21 and w3["median"]["pulls_to_kill"] == 40

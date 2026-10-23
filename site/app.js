@@ -3,19 +3,21 @@
 (function () {
   "use strict";
 
-  var COLORS = ["var(--b1)", "var(--b2)", "var(--b3)", "var(--b4)"];
+  var COLORS = ["var(--b1)", "var(--b2)", "var(--b3)", "var(--b4)", "var(--b5)", "var(--b6)", "var(--b7)", "var(--b8)", "var(--b9)"];
+  // Kill chart lines shown until the viewer picks others; nine at once tangle.
+  var CHART_DEFAULT = ["1-200", "401-600", "1001-1200", "2001-3000"];
   var METRICS = [
     { key: "pulls_to_kill", name: "Pulls to kill", hint: "Fewer is faster", fmt: num },
     { key: "nights_to_kill", name: "Raid nights to kill", hint: "Fewer is faster", fmt: num },
     { key: "combat_hours", name: "Time on boss", hint: "Combat hours", fmt: function (v) { return v.toFixed(1) + "h"; } },
-    { key: "item_level", name: "Item level on kill", hint: "Raid average. Gap shown vs top 100", fmt: function (v) { return v.toFixed(1); } }
+    { key: "item_level", name: "Item level on kill", hint: "Raid average. Gap shown vs 1-200", fmt: function (v) { return v.toFixed(1); } }
   ];
   var REPO = "https://github.com/anom0ly/guildrankanalysis";
 
   var $ = function (id) { return document.getElementById(id); };
   var index = null;
   var snap = null;
-  var state = { tier: null, region: "all", boss: null, week: null, hidden: {} };
+  var state = { tier: null, region: "all", boss: null, week: null, hidden: {}, chart: null };
 
   function num(v) { return Math.abs(v - Math.round(v)) < 0.05 ? String(Math.round(v)) : v.toFixed(1); }
   function pct(v) { return Math.round(v * 100) + "%"; }
@@ -112,15 +114,40 @@
     if (state.week === null || state.week < 0 || state.week >= snap.weeks.length) state.week = snap.weeks.length - 1;
     week.value = String(state.week);
 
-    $("brackets").innerHTML = snap.brackets.map(function (b, i) {
-      return '<button type="button" class="chip" data-bracket="' + esc(b.label) + '" aria-pressed="' + !state.hidden[b.label] +
-        '"><span class="dot" style="background:' + COLORS[i] + '"></span>' + esc(b.label) + "</button>";
-    }).join("");
+    if (!state.chart) {
+      state.chart = {};
+      snap.brackets.forEach(function (b) { state.chart[b.label] = CHART_DEFAULT.indexOf(b.label) >= 0; });
+      if (!snap.brackets.some(function (b) { return state.chart[b.label]; })) state.chart[snap.brackets[0].label] = true;
+    }
+  }
+
+  // Brackets in display order, the top bracket's slices right under it.
+  // Brackets with no guilds in this region are left out.
+  function allBrackets() {
+    var sizes = snap.views[state.region].bracket_sizes;
+    var out = [];
+    snap.brackets.forEach(function (b, i) {
+      out.push({ label: b.label, color: COLORS[i] || COLORS[COLORS.length - 1], top: i === 0, sub: false });
+      if (i === 0) {
+        (snap.slices || []).forEach(function (s) { out.push({ label: s.label, color: COLORS[0], top: false, sub: true }); });
+      }
+    });
+    return out.filter(function (b) { return sizes[b.label] > 0; });
   }
 
   function visibleBrackets() {
-    return snap.brackets.map(function (b, i) { return { label: b.label, color: COLORS[i], top: i === 0 }; })
-      .filter(function (b) { return !state.hidden[b.label]; });
+    return allBrackets().filter(function (b) { return !state.hidden[b.label]; });
+  }
+
+  function dot(b) {
+    return '<span class="dot' + (b.sub ? " ring" : "") + '" style="' + (b.sub ? "border-color:" : "background:") + b.color + '"></span>';
+  }
+
+  function renderChips() {
+    $("brackets").innerHTML = allBrackets().map(function (b) {
+      return '<button type="button" class="chip' + (b.sub ? " sub" : "") + '" data-bracket="' + esc(b.label) + '" aria-pressed="' +
+        !state.hidden[b.label] + '">' + dot(b) + esc(b.label) + "</button>";
+    }).join("");
   }
 
   // A bracket x boss cell as it stood at the end of the selected week.
@@ -153,7 +180,7 @@
         var text = v === null ? "–" : esc(m.fmt(v));
         var mult = b.top ? "" : multText(m.key, c.vs_top[m.key]);
         var nText = "n " + n + (v === null && n < snap.rules.min_sample ? " (needs " + snap.rules.min_sample + ")" : "");
-        return '<div class="row"><span class="row-label">' + esc(b.label) + "</span>" +
+        return '<div class="row' + (b.sub ? " sub" : "") + '"><span class="row-label">' + esc(b.label) + "</span>" +
           '<div class="bar"><div style="width:' + width + "%;background:" + b.color + '"></div></div>' +
           '<span class="val">' + text + (mult ? ' <span class="mult">' + mult + "</span>" : "") +
           '<span class="n">' + nText + "</span></span></div>";
@@ -184,7 +211,7 @@
       return { vals: vals, max: Math.max.apply(null, present.concat([0])) };
     });
     var body = "<tbody>" + brackets.map(function (br, r) {
-      return '<tr><th scope="row"><span class="dot" style="background:' + br.color + '"></span>' + esc(br.label) + "</th>" +
+      return "<tr" + (br.sub ? ' class="sub"' : "") + '><th scope="row">' + dot(br) + esc(br.label) + "</th>" +
         snap.bosses.map(function (b, ci) {
           var v = cols[ci].vals[r];
           var cell = cellAt(b.slug, br.label);
@@ -204,7 +231,8 @@
   function renderChart() {
     var bossName = snap.bosses.filter(function (b) { return b.slug === state.boss; })[0].name;
     $("chart-title").textContent = bossName + " kills over the tier";
-    var brackets = visibleBrackets();
+    var options = visibleBrackets();
+    var brackets = options.filter(function (b) { return state.chart[b.label]; });
     var weeks = snap.weeks.length;
     var W = 560, H = 300, x0 = 56, x1 = 540, y0 = 20, y1 = 260;
     var px = function (i) { return weeks > 1 ? x0 + i * (x1 - x0) / (weeks - 1) : (x0 + x1) / 2; };
@@ -225,7 +253,8 @@
       var d = series.map(function (v, i) { return v === null ? null : (i === 0 ? "M" : "L") + px(i).toFixed(1) + " " + py(v).toFixed(1); })
         .filter(Boolean).join(" ").replace(/^L/, "M");
       if (d) {
-        s += '<path d="' + d + '" fill="none" stroke-width="3" stroke-linejoin="round" stroke-linecap="round" style="stroke:' + br.color + '"></path>';
+        s += '<path d="' + d + '" fill="none" stroke-width="3" stroke-linejoin="round" stroke-linecap="round"' +
+          (br.sub ? ' stroke-dasharray="6 5"' : "") + ' style="stroke:' + br.color + '"></path>';
       }
       var v = series[state.week];
       if (v !== null && v !== undefined) {
@@ -236,10 +265,10 @@
     s += '<line x1="' + px(state.week) + '" x2="' + px(state.week) + '" y1="' + y0 + '" y2="' + y1 + '" stroke-dasharray="3 4" style="stroke:var(--muted)"></line>';
     s += '<text x="' + px(state.week) + '" y="14" text-anchor="middle" font-size="11" style="fill:var(--muted)">As of</text>';
     s += "</svg>";
-    s += '<div class="legend">' + brackets.map(function (br) {
+    s += '<div class="legend" role="group" aria-label="Lines shown">' + options.map(function (br) {
       var v = snap.views[state.region].bosses[state.boss][br.label].kill_share_weekly[state.week];
-      return '<span><span class="dot" style="background:' + br.color + '"></span>' + esc(br.label) +
-        (v === null || v === undefined ? "" : " " + pct(v)) + "</span>";
+      return '<button type="button" class="lg" data-line="' + esc(br.label) + '" aria-pressed="' + !!state.chart[br.label] + '">' +
+        dot(br) + esc(br.label) + (v === null || v === undefined ? "" : " " + pct(v)) + "</button>";
     }).join("") + "</div>";
     $("chart").innerHTML = s;
   }
@@ -249,6 +278,7 @@
     var t = tierEntry(state.tier);
     $("subtitle").textContent = snap.tier.name + " · Week " + (state.week + 1) + " of tier" +
       (t && t.updated_at ? " · Last refreshed " + fmtDate(t.updated_at) : "");
+    renderChips();
     renderCards();
     renderHeat();
     renderChart();
@@ -276,7 +306,7 @@
   }
 
   function bind() {
-    $("tier").addEventListener("change", function (e) { state.tier = e.target.value; state.week = null; loadTier(); });
+    $("tier").addEventListener("change", function (e) { state.tier = e.target.value; state.week = null; state.chart = null; loadTier(); });
     $("region").addEventListener("change", function (e) { state.region = e.target.value; render(); });
     $("boss").addEventListener("change", function (e) { state.boss = e.target.value; render(); });
     $("week").addEventListener("change", function (e) { state.week = +e.target.value; render(); });
@@ -284,11 +314,17 @@
       var btn = e.target.closest("button[data-bracket]");
       if (!btn) return;
       var label = btn.getAttribute("data-bracket");
-      var shown = snap.brackets.filter(function (b) { return !state.hidden[b.label]; }).length;
+      var shown = visibleBrackets().length;
       if (!state.hidden[label] && shown === 1) return; // keep at least one bracket
       state.hidden[label] = !state.hidden[label];
-      btn.setAttribute("aria-pressed", String(!state.hidden[label]));
       render();
+    });
+    $("chart").addEventListener("click", function (e) {
+      var btn = e.target.closest("button[data-line]");
+      if (!btn) return;
+      var label = btn.getAttribute("data-line");
+      state.chart[label] = !state.chart[label];
+      renderChart();
     });
   }
 

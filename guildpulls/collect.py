@@ -91,7 +91,8 @@ def collect(store: Store, wcl: WCLClient, tier: Tier, run_id: str, max_rank: int
     now = now or datetime.now(timezone.utc)
     done = store.done_in_run(tier.key, run_id)
     kills = store.rio_kills(tier.key)
-    todo = [g for g in store.guilds(tier.key) if g["world_rank"] <= max_rank and g["rio_guild_id"] not in done]
+    todo = [g for g in store.guilds(tier.key)
+            if raiderio.in_scope(g["world_rank"], g["region_rank"], max_rank) and g["rio_guild_id"] not in done]
     if limit is not None:
         todo = todo[:limit]
     log.info("%d guilds to process (%d already done in run %s)", len(todo), len(done), run_id)
