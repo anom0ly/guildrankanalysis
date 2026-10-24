@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import logging
 import os
+import threading
 import time
 from dataclasses import dataclass
 from typing import Callable
@@ -69,6 +70,7 @@ class WCLClient:
         self._token: str | None = None
         self._token_expires = 0.0
         self.points_used = 0.0
+        self._budget_lock = threading.Lock()
 
     # Auth
     def _auth(self) -> str:
@@ -87,11 +89,16 @@ class WCLClient:
     def wait_for_budget(self) -> None:
         if self.rate.remaining >= self.reserve:
             return
-        wait = self.rate.reset_in + 5
-        log.warning("WCL points low (%.0f left), pausing %.0fs until the hourly reset",
-                    self.rate.remaining, wait)
-        self.sleep(wait)
-        self.rate = RateLimit(limit_per_hour=self.rate.limit_per_hour, spent=0, reset_in=3600)
+        # Queries run in parallel in the enrich step: one thread logs and
+        # sleeps, the others wait on the lock and then find the budget reset.
+        with self._budget_lock:
+            if self.rate.remaining >= self.reserve:
+                return
+            wait = self.rate.reset_in + 5
+            log.warning("WCL points low (%.0f left), pausing %.0fs until the hourly reset",
+                        self.rate.remaining, wait)
+            self.sleep(wait)
+            self.rate = RateLimit(limit_per_hour=self.rate.limit_per_hour, spent=0, reset_in=3600)
 
     def _update_rate(self, data: dict) -> None:
         rl = data.get("rateLimitData")
@@ -189,7 +196,9 @@ class WCLClient:
     def enrich_reports(self, items: list[tuple[str, list[int]]]) -> dict[str, dict]:
         """For each (report code, stored fight ids): the fights again (for
         fightPercentage and the players in each), the report's players and
-        ability names, and every player death in those fights.
+        ability names, and every player death in those fights. A report WCL no
+        longer gives events for (made private or deleted since it was stored)
+        comes back as {"unreadable": True}.
 
         Deaths come from events, about 10 points a report. The Deaths table
         is cheaper but stops at 200 deaths a report, which a progression night
@@ -212,14 +221,21 @@ class WCLClient:
         out = {}
         for i, (code, fids) in enumerate(items):
             rep = data.get(f"r{i}")
-            if not rep:
+            page = (rep or {}).get("events")
+            if not page:
+                out[code] = {"unreadable": True}
                 continue
-            page = rep["events"]
-            found = list(page["data"] or [])
+            found = list(page.get("data") or [])
             while page.get("nextPageTimestamp"):
-                page = self.query(f'reportData {{ report(code: "{_safe_code(code)}") '
-                                  f'{{ {events(code, fids, page["nextPageTimestamp"])} }} }}')["reportData"]["report"]["events"]
-                found += page["data"] or []
+                more = self.query(f'reportData {{ report(code: "{_safe_code(code)}") '
+                                  f'{{ {events(code, fids, page["nextPageTimestamp"])} }} }}')["reportData"]
+                page = (more.get("report") or {}).get("events")
+                if not page:
+                    break
+                found += page.get("data") or []
+            if not page:
+                out[code] = {"unreadable": True}
+                continue
             master = rep.get("masterData") or {}
             names = {a["gameID"]: a["name"] for a in master.get("abilities") or []}
             out[code] = {

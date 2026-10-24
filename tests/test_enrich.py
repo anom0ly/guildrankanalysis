@@ -182,3 +182,33 @@ def test_waves_keep_order_and_skip_failed_queries(monkeypatch):
         [("a", "a"), ("b", None), ("c", "c"), ("d", "d"), ("e", "e")]
     stops = iter([False, True])
     assert len(list(waves(batches, call, lambda: next(stops)))) == 3  # one wave, then the deadline
+
+
+def test_unreadable_report_is_skipped_and_not_asked_again(monkeypatch):
+    monkeypatch.setattr(config, "ENRICH_REPORTS_PER_QUERY", 1)
+    monkeypatch.setattr(config, "ENRICH_WORKERS", 2)
+    store = Store(":memory:")
+    run_collect(store)
+    wcl = EnrichWCL(store)
+    real = wcl.enrich_reports
+
+    def flaky(items):
+        if items[0][0] == "R901":
+            return {"R901": {"unreadable": True}}
+        return real(items)
+    wcl.enrich_reports = flaky
+    assert not enrich(store, wcl, TIER, clock=lambda: NOW)
+    assert store.enrich_counts(TIER.key) == (2, 2)
+    assert all(p.deaths is None for p in store.pulls_by_guild(TIER.key)[901])
+    assert any(p.deaths is not None for p in store.pulls_by_guild(TIER.key)[903])
+
+
+def test_unexpected_error_skips_only_its_batch(monkeypatch):
+    from guildpulls.enrich import waves
+    monkeypatch.setattr(config, "ENRICH_WORKERS", 2)
+
+    def call(batch):
+        if batch[0][0] == "a":
+            raise TypeError("'NoneType' object is not subscriptable")
+        return batch[0][0]
+    assert [r for _, r in waves([[("a", [])], [("b", [])]], call, lambda: False)] == [None, "b"]

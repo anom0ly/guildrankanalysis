@@ -105,6 +105,10 @@ def waves(batches: list, call: Callable, out_of_time: Callable[[], bool]) -> Ite
                 except WCLError as e:
                     log.error("query at %s: %s", b[0][0], e)
                     yield b, None
+                except Exception:
+                    # Anything unexpected in one batch skips that batch, not the whole pass.
+                    log.exception("query at %s failed", b[0][0])
+                    yield b, None
 
 
 def enrich(store: Store, wcl: WCLClient, tier: Tier, deadline: datetime | None = None,
@@ -119,18 +123,29 @@ def enrich(store: Store, wcl: WCLClient, tier: Tier, deadline: datetime | None =
     step = config.ENRICH_REPORTS_PER_QUERY
     batches = [[(r["code"], store.fight_ids(tier.key, r["code"])) for r in todo[i:i + step]]
                for i in range(0, len(todo), step)]
-    read = 0
+    read = skipped = 0
     for batch, got in waves(batches, wcl.enrich_reports, out_of_time):
         if got is None:
             continue
         now_ms = int(clock().timestamp() * 1000)
         for code, _ in batch:
-            if code in got:
+            if code not in got:
+                continue
+            if got[code].get("unreadable"):
+                # Marked done with nothing stored, so it isn't asked for again;
+                # its pulls stay unread and leave the guild out of the second
+                # read's numbers on those bosses.
+                store.mark_enriched(tier.key, code, now_ms)
+                skipped += 1
+                log.warning("report %s has no event data (private or deleted); skipped", code)
+            else:
                 save_report_enrichment(store, tier, code, got[code], now_ms)
-                read += 1
+            read += 1
         if read % 1000 < step:
             log.info("enrich: %d/%d reports read, WCL points left this hour: %.0f", read, len(todo),
                      wcl.rate.remaining)
+    if skipped:
+        log.info("enrich: %d unreadable reports skipped", skipped)
     if out_of_time():
         log.info("enrich stopped at the deadline after %d of %d reports", read, len(todo))
         return True

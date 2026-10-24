@@ -95,3 +95,24 @@ def test_enrich_reports_pages_death_events_and_names_killers():
                               "killingAbilityName": "Living Venom"},
                              {"fight": 4, "timestamp": 7, "killingAbilityGameID": None, "killingAbilityName": None}]
     assert "startTime: 6.0" in c.session.calls[-1][1]["json"]["query"]
+
+
+def test_report_without_events_is_unreadable_not_a_crash():
+    gone = {"fights": [], "masterData": None, "events": None}
+    ok = {"fights": [], "masterData": {"actors": [], "abilities": []}, "events": {"data": [], "nextPageTimestamp": None}}
+    c, _ = client([FakeResponse(200, {"data": {"reportData": {"r0": gone, "r1": None, "r2": ok}, **rate(10)}})])
+    got = c.enrich_reports([("a", [1]), ("b", [1]), ("c", [1])])
+    assert got["a"] == {"unreadable": True} and got["b"] == {"unreadable": True}
+    assert got["c"]["deaths"] == []
+
+
+def test_parallel_queries_pause_once_for_the_budget():
+    import threading
+    c, sleeps = client([])
+    c.rate.spent = 17_900
+    threads = [threading.Thread(target=c.wait_for_budget) for _ in range(8)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert len(sleeps) == 1
