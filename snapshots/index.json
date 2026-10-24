@@ -1,6 +1,6 @@
 {
  "schema": 1,
- "generated_at": "2026-10-23T22:56:51.558419+00:00",
+ "generated_at": "2026-10-24T03:30:13.850293+00:00",
  "tiers": [
   {
    "key": "venomous-abyss",
@@ -12,8 +12,12 @@
    "snapshot": "venomous-abyss/latest.json",
    "guilds": "venomous-abyss/guilds.json",
    "compare": "venomous-abyss/compare.json",
-   "updated_at": "2026-10-23T07:30:18.270835+00:00",
-   "backfill": null
+   "updated_at": "2026-10-24T03:29:49.788959+00:00",
+   "backfill": null,
+   "enrich": {
+    "done": 4400,
+    "total": 47643
+   }
   },
   {
    "key": "mn-tier-1",
@@ -30,7 +34,8 @@
     "state": "loading",
     "done": 2898,
     "total": 9566
-   }
+   },
+   "enrich": null
   },
   {
    "key": "manaforge-omega",
@@ -47,7 +52,8 @@
     "state": "queued",
     "done": 0,
     "total": 0
-   }
+   },
+   "enrich": null
   },
   {
    "key": "liberation-of-undermine",
@@ -64,7 +70,8 @@
     "state": "queued",
     "done": 0,
     "total": 0
-   }
+   },
+   "enrich": null
   },
   {
    "key": "nerubar-palace",
@@ -81,7 +88,8 @@
     "state": "queued",
     "done": 0,
     "total": 0
-   }
+   },
+   "enrich": null
   }
  ],
  "run": {
