@@ -315,6 +315,10 @@ class Store:
                 )
             self.db.execute("UPDATE reports SET enriched_at_ms = ? WHERE tier = ? AND code = ?", (now_ms, tier, code))
 
+    def mark_enriched(self, tier: str, code: str, now_ms: int) -> None:
+        with self.db:
+            self.db.execute("UPDATE reports SET enriched_at_ms = ? WHERE tier = ? AND code = ?", (now_ms, tier, code))
+
     def kill_summaries(self, tier: str) -> dict[tuple[str, int], dict]:
         out = {}
         for r in self.db.execute("SELECT * FROM kill_summary WHERE tier = ?", (tier,)):
