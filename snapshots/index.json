@@ -1,6 +1,6 @@
 {
  "schema": 1,
- "generated_at": "2026-10-24T03:30:13.850293+00:00",
+ "generated_at": "2026-10-24T08:01:49.048014+00:00",
  "tiers": [
   {
    "key": "venomous-abyss",
@@ -15,7 +15,7 @@
    "updated_at": "2026-10-24T03:29:49.788959+00:00",
    "backfill": null,
    "enrich": {
-    "done": 4400,
+    "done": 5490,
     "total": 47643
    }
   },
@@ -32,7 +32,7 @@
    "updated_at": null,
    "backfill": {
     "state": "loading",
-    "done": 2898,
+    "done": 4465,
     "total": 9566
    },
    "enrich": null
