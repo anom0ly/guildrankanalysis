@@ -1,6 +1,6 @@
 {
  "schema": 1,
- "generated_at": "2026-10-27T09:00:07.549142+00:00",
+ "generated_at": "2026-10-27T14:21:47.719644+00:00",
  "tiers": [
   {
    "key": "venomous-abyss",
@@ -12,11 +12,11 @@
    "snapshot": "venomous-abyss/latest.json",
    "guilds": "venomous-abyss/guilds.json",
    "compare": "venomous-abyss/compare.json",
-   "updated_at": "2026-10-27T05:55:39.395521+00:00",
+   "updated_at": "2026-10-27T10:59:58.704112+00:00",
    "backfill": null,
    "enrich": {
-    "done": 49801,
-    "total": 49811
+    "done": 50673,
+    "total": 50683
    }
   },
   {
@@ -62,13 +62,13 @@
    "starts": "2025-03-04T15:00:00+00:00",
    "ends": "2025-08-12T15:00:00+00:00",
    "current": false,
-   "snapshot": null,
-   "guilds": null,
-   "compare": null,
-   "updated_at": null,
+   "snapshot": "liberation-of-undermine/latest.json",
+   "guilds": "liberation-of-undermine/guilds.json",
+   "compare": "liberation-of-undermine/compare.json",
+   "updated_at": "2026-10-27T11:00:40.938295+00:00",
    "backfill": {
-    "state": "loading",
-    "done": 5662,
+    "state": "complete",
+    "done": 7861,
     "total": 7861
    },
    "enrich": null
@@ -85,20 +85,20 @@
    "compare": null,
    "updated_at": null,
    "backfill": {
-    "state": "queued",
-    "done": 0,
-    "total": 0
+    "state": "loading",
+    "done": 212,
+    "total": 9809
    },
    "enrich": null
   }
  ],
  "run": {
   "tier": "venomous-abyss",
-  "run_id": "2026-10-26",
-  "started_at": "2026-10-26T11:44:53.160667+00:00",
-  "completed_at": "2026-10-26T12:10:30.018952+00:00",
+  "run_id": "2026-10-27",
+  "started_at": "2026-10-27T09:50:57.359300+00:00",
+  "completed_at": "2026-10-27T10:17:17.984631+00:00",
   "complete": true,
-  "done": 5648,
-  "total": 5648
+  "done": 5676,
+  "total": 5676
  }
 }
