@@ -1,6 +1,6 @@
 {
  "schema": 1,
- "generated_at": "2026-10-28T20:57:04.630390+00:00",
+ "generated_at": "2026-10-28T22:14:22.959363+00:00",
  "tiers": [
   {
    "key": "venomous-abyss",
@@ -12,7 +12,7 @@
    "snapshot": "venomous-abyss/latest.json",
    "guilds": "venomous-abyss/guilds.json",
    "compare": "venomous-abyss/compare.json",
-   "updated_at": "2026-10-28T17:50:27.021882+00:00",
+   "updated_at": "2026-10-28T20:59:52.925141+00:00",
    "backfill": null,
    "enrich": {
     "done": 51719,
@@ -80,13 +80,13 @@
    "starts": "2024-09-10T15:00:00+00:00",
    "ends": "2025-03-04T15:00:00+00:00",
    "current": false,
-   "snapshot": null,
-   "guilds": null,
-   "compare": null,
-   "updated_at": null,
+   "snapshot": "nerubar-palace/latest.json",
+   "guilds": "nerubar-palace/guilds.json",
+   "compare": "nerubar-palace/compare.json",
+   "updated_at": "2026-10-28T21:00:25.753283+00:00",
    "backfill": {
-    "state": "loading",
-    "done": 9050,
+    "state": "complete",
+    "done": 9809,
     "total": 9809
    },
    "enrich": null
