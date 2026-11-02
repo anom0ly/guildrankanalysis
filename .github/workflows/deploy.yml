@@ -54,6 +54,16 @@ jobs:
         with:
           fetch-depth: 0
 
+      # A refresh calls this workflow at the commit it started on, which can be
+      # hours old. Always publish the site as it is on main now, so a refresh
+      # that began before a site change doesn't put the old site back.
+      - name: Use the site from the latest main
+        run: |
+          git fetch --no-tags origin main
+          rm -rf site
+          git checkout FETCH_HEAD -- site
+          echo "Site files from main at $(git rev-parse --short FETCH_HEAD)"
+
       - name: Add the published data
         run: |
           if git ls-remote --exit-code --heads origin data >/dev/null; then
