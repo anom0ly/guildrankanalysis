@@ -308,8 +308,8 @@
     var m = metricInfo(state.metric);
     var summary = snap.views[state.region].tier_summary;
     var head = "<thead><tr><th scope=\"col\">Bracket</th>" + snap.bosses.map(function (b) {
-      var sel = b.slug === state.boss ? ' style="color:var(--text)"' : "";
-      return '<th scope="col" class="boss" data-boss="' + esc(b.slug) + '" title="' + esc(b.name) + '"' + sel + ">" + esc(b.name) + "</th>";
+      var sel = b.slug === state.boss ? " sel" : "";
+      return '<th scope="col" class="boss' + sel + '" data-boss="' + esc(b.slug) + '" title="' + esc(b.name) + '">' + esc(b.name) + "</th>";
     }).join("") + (summary ? TIER_METRICS.map(function (t, i) {
       return '<th scope="col" class="tiercol' + (i === 0 ? " first" : "") + '">' + esc(t.name) + "</th>";
     }).join("") : "") + "</tr></thead>";

@@ -318,7 +318,7 @@
       dots += '<circle cx="' + px + '" cy="' + (15 + ((k % 5) - 2) * 3.2).toFixed(1) + '" r="2.2" style="fill:var(--peer)" fill-opacity="0.75"></circle>';
     });
     var me = mine === null ? "" : '<path d="M' + x(mine).toFixed(1) + " 5 L" + (x(mine) + 8).toFixed(1) + " 15 L" + x(mine).toFixed(1) + " 25 L" +
-      (x(mine) - 8).toFixed(1) + ' 15Z" style="fill:var(--gb);stroke:var(--surface)" stroke-width="1.5"></path>';
+      (x(mine) - 8).toFixed(1) + ' 15Z" style="fill:var(--ga);stroke:var(--surface)" stroke-width="1.5"></path>';
     return '<svg class="strip" viewBox="0 0 ' + W + " " + H + '" role="img" aria-label="' + s.n + " peers, median " + esc(m.fmt(s.med)) + '">' +
       '<rect x="' + x(s.p25).toFixed(1) + '" y="7" width="' + Math.max(2, x(s.p75) - x(s.p25)).toFixed(1) + '" height="16" rx="3" style="fill:var(--band)"></rect>' +
       dots + '<rect x="' + (x(s.med) - 1).toFixed(1) + '" y="3" width="2" height="24" style="fill:var(--text)"></rect>' + me + "</svg>";
@@ -337,7 +337,7 @@
     var region = api.state.region;
     var directional = !!(LOWER_BETTER[m.key] || HIGHER_BETTER[m.key]);
     var head = '<div class="panel-head"><h2>' + (G ? esc(G.name) + " against its peers" : "Against peers") + "</h2>";
-    var pickers = '<div class="controls">' + searchField("a", "Guild", G, "var(--gb)") + "</div>";
+    var pickers = '<div class="controls">' + searchField("a", "Guild", G, "var(--ga)") + "</div>";
     if (!G) {
       return head + "<p>Pick a guild to see how it compares with the guilds ranked within " + data.raw.peer_window +
         " places of it.</p></div>" + pickers + '<p class="none">Search for a guild to start.</p>';
@@ -368,12 +368,12 @@
     var legend = '<div class="legend"><span><svg width="12" height="12" aria-hidden="true"><circle cx="6" cy="6" r="3" style="fill:var(--peer)"></circle></svg>One peer guild</span>' +
       '<span><svg width="22" height="12" aria-hidden="true"><rect y="2" width="22" height="8" rx="2" style="fill:var(--band)"></rect></svg>Middle half of peers</span>' +
       '<span><svg width="6" height="14" aria-hidden="true"><rect x="2" width="2" height="14" style="fill:var(--text)"></rect></svg>Peer median</span>' +
-      '<span><svg width="14" height="14" aria-hidden="true"><path d="M7 1 L13 7 L7 13 L1 7Z" style="fill:var(--gb)"></path></svg>' + esc(G.name) + "</span></div>";
+      '<span><svg width="14" height="14" aria-hidden="true"><path d="M7 1 L13 7 L7 13 L1 7Z" style="fill:var(--ga)"></path></svg>' + esc(G.name) + "</span></div>";
     var scoreHead = directional ? "Better than" : "Above";
     var rows = names.map(function (name, i) {
       var s = stats[i], v = mine[i];
       var low = v !== null && m.key === "pulls_to_kill" && s.floor !== undefined && v < s.floor;
-      return '<tr><th scope="row">' + esc(name) + '</th><td class="num gb"><b>' + (v === null ? missing(G, i) : esc(m.fmt(v))) +
+      return '<tr><th scope="row">' + esc(name) + '</th><td class="num ga"><b>' + (v === null ? missing(G, i) : esc(m.fmt(v))) +
         (low ? '<span class="muted" title="Under a quarter of the peer median, so the logs may miss nights">*</span>' : "") + "</b></td>" +
         '<td class="num">' + (s.med === undefined ? "–" : esc(m.fmt(s.med))) + "</td>" +
         '<td class="stripcell">' + (s.med === undefined ? '<span class="muted">Fewer than ' + data.raw.min_sample + " peers with this in their numbers</span>" : strip(s, v, m)) + "</td>" +
