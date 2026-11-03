@@ -4,8 +4,9 @@
   "use strict";
 
   var COLORS = ["var(--b1)", "var(--b2)", "var(--b3)", "var(--b4)", "var(--b5)", "var(--b6)", "var(--b7)", "var(--b8)", "var(--b9)"];
-  // Kill chart lines shown until the viewer picks others; nine at once tangle.
-  var CHART_DEFAULT = ["1-200", "401-600", "1001-1200", "2001-3000"];
+  // Brackets the bracket view leaves out. 21-200 is most of 1-200 and repeats
+  // it; the two lowest brackets are still loaded for the guild views.
+  var HIDDEN_BRACKETS = ["21-200", "2001-3000", "3001-5000"];
   function hours(v) { return v.toFixed(1) + "h"; }
   function ilvl(v) { return v.toFixed(1); }
   function share(v) { return Math.round(v) + "%"; }
@@ -33,14 +34,20 @@
     { key: "raid_hps_on_kill", group: "Throughput", name: "Healer HPS on kill", hint: "Healers' HPS added up, first kill", fmt: big },
     { key: "comp_similarity", group: "Throughput", name: "Comp match", hint: "How close the kill's spec mix is to 1-200's average (100% is the same). Gap in points", fmt: share, diff: true }
   ];
-  var GROUPS = ["Progress", "Learning curve", "Wipe depth", "Schedule", "Gear", "Deaths", "Roster", "Throughput"];
-  var KILL_KEYS = ["raid_dps_on_kill", "raid_hps_on_kill", "comp_similarity"];
-  var DEATH_GROUPS = ["Deaths", "Roster"];
-  var TIER_METRICS = [
-    { key: "hours_per_week", name: "Hours / week", fmt: function (v) { return v.toFixed(1); } },
-    { key: "nights_per_week", name: "Nights / week", fmt: function (v) { return v.toFixed(1); } },
-    { key: "regulars", name: "Players", fmt: num }
+  // The bracket view's metric menu. Metrics left out barely differ between
+  // brackets; Head to head and Against peers still offer every metric.
+  var MENU = [
+    { label: "Headline", keys: ["pulls_to_kill", "nights_to_kill", "combat_hours", "pulls_to_sub10", "longest_plateau",
+                                 "item_level", "avoidable_deaths_per_pull", "comp_similarity"] },
+    { label: "More metrics", keys: ["closeout_pulls", "late_wipe_share", "first_pull_ilvl", "early_deaths_per_pull", "players_used"] }
   ];
+  function inMenu(key) { return MENU.some(function (g) { return g.keys.indexOf(key) >= 0; }); }
+  var GROUPS = ["Progress", "Learning curve", "Wipe depth", "Schedule", "Gear", "Deaths", "Roster", "Throughput"];
+  var SCHEDULE = [
+    { key: "hours_per_week", name: "Hours raided per week", max: 8 },
+    { key: "nights_per_week", name: "Nights raided per week", max: 3 }
+  ];
+  var DETAILS = ["kills", "curve", "wipes", "gear", "deaths", "comp"];
   function metricInfo(key) { return METRICS.filter(function (m) { return m.key === key; })[0]; }
   var REPO = "https://github.com/anom0ly/guildrankanalysis";
 
@@ -49,8 +56,8 @@
   var snap = null;
   var VIEWS = ["brackets", "h2h", "peers"];
   // view: the tab; a and b: Raider.IO guild ids picked in the guild views (a is the peers view's guild).
-  var state = { tier: null, region: "all", boss: null, week: null, hidden: {}, chart: null, metric: "pulls_to_kill",
-                view: "brackets", a: null, b: null };
+  var state = { tier: null, region: "all", boss: null, week: null, hidden: {}, metric: "pulls_to_kill",
+                view: "brackets", detail: "kills", a: null, b: null };
 
   function num(v) { return Math.abs(v - Math.round(v)) < 0.05 ? String(Math.round(v)) : v.toFixed(1); }
   function pct(v) { return Math.round(v * 100) + "%"; }
@@ -83,6 +90,7 @@
     if (q.get("week") && !isNaN(+q.get("week"))) state.week = +q.get("week") - 1;
     (q.get("hide") || "").split(",").filter(Boolean).forEach(function (b) { state.hidden[b] = true; });
     if (VIEWS.indexOf(q.get("view")) >= 0) state.view = q.get("view");
+    if (DETAILS.indexOf(q.get("detail")) >= 0) state.detail = q.get("detail");
     ["a", "b"].forEach(function (k) { if (q.get(k) && !isNaN(+q.get(k))) state[k] = +q.get(k); });
   }
   function writeURL() {
@@ -95,6 +103,7 @@
     var hide = Object.keys(state.hidden).filter(function (k) { return state.hidden[k]; });
     if (hide.length) q.set("hide", hide.join(","));
     if (state.view !== "brackets") q.set("view", state.view);
+    if (state.detail !== "kills") q.set("detail", state.detail);
     if (state.a !== null) q.set("a", state.a);
     if (state.b !== null) q.set("b", state.b);
     history.replaceState(null, "", "?" + q.toString());
@@ -129,7 +138,7 @@
   // The second read of the logs (roster, deaths, comp) fills in over a few days.
   function enrichNote() {
     var t = tierEntry(state.tier), e = t && t.enrich;
-    if (!e || !e.total || e.done >= e.total) return "";
+    if (!e || !e.total || e.done >= 0.95 * e.total) return "";
     return " · Deaths and roster: " + Math.floor(100 * e.done / e.total) + "% of logs read";
   }
 
@@ -162,15 +171,9 @@
   }
 
   function fillSnapshotControls() {
-    var boss = $("boss");
-    boss.innerHTML = snap.bosses.map(function (b, i) {
-      var last = i === snap.bosses.length - 1 ? " (final boss)" : "";
-      return '<option value="' + esc(b.slug) + '">' + esc(b.name + last) + "</option>";
-    }).join("");
     if (!snap.bosses.some(function (b) { return b.slug === state.boss; })) {
       state.boss = snap.bosses[snap.bosses.length - 1].slug;
     }
-    boss.value = state.boss;
 
     var week = $("week");
     week.innerHTML = snap.weeks.map(function (w, i) {
@@ -179,16 +182,10 @@
     }).join("");
     if (state.week === null || state.week < 0 || state.week >= snap.weeks.length) state.week = snap.weeks.length - 1;
     week.value = String(state.week);
-
-    if (!state.chart) {
-      state.chart = {};
-      snap.brackets.forEach(function (b) { state.chart[b.label] = CHART_DEFAULT.indexOf(b.label) >= 0; });
-      if (!snap.brackets.some(function (b) { return state.chart[b.label]; })) state.chart[snap.brackets[0].label] = true;
-    }
   }
 
   // Brackets in display order, the top bracket's slices right under it.
-  // Brackets with no guilds in this region are left out.
+  // Brackets with no guilds in this region, and HIDDEN_BRACKETS, are left out.
   function allBrackets() {
     var sizes = snap.views[state.region].bracket_sizes;
     var out = [];
@@ -198,7 +195,7 @@
         (snap.slices || []).forEach(function (s) { out.push({ label: s.label, color: COLORS[0], top: false, sub: true }); });
       }
     });
-    return out.filter(function (b) { return sizes[b.label] > 0; });
+    return out.filter(function (b) { return sizes[b.label] > 0 && HIDDEN_BRACKETS.indexOf(b.label) < 0; });
   }
 
   function visibleBrackets() {
@@ -209,10 +206,12 @@
     return '<span class="dot' + (b.sub ? " ring" : "") + '" style="' + (b.sub ? "border-color:" : "background:") + b.color + '"></span>';
   }
 
-  function renderChips() {
-    $("brackets").innerHTML = allBrackets().map(function (b) {
-      return '<button type="button" class="chip' + (b.sub ? " sub" : "") + '" data-bracket="' + esc(b.label) + '" aria-pressed="' +
-        !state.hidden[b.label] + '">' + dot(b) + esc(b.label) + "</button>";
+  function renderBracketMenu() {
+    var all = allBrackets(), shown = visibleBrackets().length;
+    $("brackets-count").textContent = shown === all.length ? "All " + all.length : shown + " of " + all.length;
+    $("brackets").innerHTML = all.map(function (b) {
+      return '<label class="opt' + (b.sub ? " sub" : "") + '"><input type="checkbox" data-bracket="' + esc(b.label) + '"' +
+        (state.hidden[b.label] ? "" : " checked") + ">" + dot(b) + esc(b.label) + "</label>";
     }).join("");
   }
 
@@ -235,101 +234,35 @@
   function med(c, key) { var v = c.median[key]; return v === undefined ? null : v; }
   function bossName() { return snap.bosses.filter(function (b) { return b.slug === state.boss; })[0].name; }
 
-  function card(m, brackets) {
-    var cells = brackets.map(function (b) { return cellAt(state.boss, b.label); });
-    var vals = cells.map(function (c) { return med(c, m.key); }).filter(function (v) { return v !== null; });
-    var lo = 0, hi = Math.max.apply(null, vals.concat([0]));
-    if ((m.key === "item_level" || m.key === "first_pull_ilvl") && vals.length) {
-      lo = Math.floor(Math.min.apply(null, vals)) - 5;
-      hi = Math.ceil(hi) + 1;
-    }
-    var rows = brackets.map(function (b, i) {
-      var c = cells[i], v = med(c, m.key), n = c.n[m.key] || 0;
-      var width = v === null || hi <= lo ? 0 : Math.max(2, Math.round((v - lo) / (hi - lo) * 100));
-      var text = v === null ? "–" : esc(m.fmt(v));
-      var mult = b.top ? "" : multText(m.key, c.vs_top[m.key]);
-      var nText = "n " + n + (v === null && n < snap.rules.min_sample ? " (needs " + snap.rules.min_sample + ")" : "");
-      return '<div class="row' + (b.sub ? " sub" : "") + '"><span class="row-label">' + esc(b.label) + "</span>" +
-        '<div class="bar"><div style="width:' + width + "%;background:" + b.color + '"></div></div>' +
-        '<span class="val">' + text + (mult ? ' <span class="mult">' + mult + "</span>" : "") +
-        '<span class="n">' + nText + "</span></span></div>";
+  function renderMetricMenu() {
+    if (!inMenu(state.metric) || snap.metrics.indexOf(state.metric) < 0) state.metric = "pulls_to_kill";
+    $("metric").innerHTML = MENU.map(function (g) {
+      var ks = g.keys.filter(function (k) { return snap.metrics.indexOf(k) >= 0; });
+      if (!ks.length) return "";
+      return '<optgroup label="' + esc(g.label) + '">' + ks.map(function (k) {
+        return '<option value="' + k + '">' + esc(metricInfo(k).name) + "</option>";
+      }).join("") + "</optgroup>";
     }).join("");
-    var foot;
-    if (m.key === "pulls_to_kill") {
-      foot = "Pull counts from Raider.IO: " + brackets.map(function (b, i) {
-        var c = cells[i], s = c.pulls_source, used = c.used;
-        return esc(b.label) + " " + (used ? pct((s.rio_fill + s.rio_corrected) / used) : "–");
-      }).join(" · ");
-    } else if (KILL_KEYS.indexOf(m.key) >= 0) {
-      foot = "From Warcraft Logs rankings of each guild's first kill.";
-    } else if (DEATH_GROUPS.indexOf(m.group) >= 0) {
-      foot = "Logs only. A guild counts once every one of its pulls on the boss has had the second read.";
-    } else {
-      foot = "Logs only, so the sample is guilds with the kill in public logs.";
-    }
-    return '<div class="card"><div><div class="card-name">' + m.name + '</div><div class="card-hint">' + m.hint +
-      '</div></div><div class="rows">' + rows + '</div><div class="card-foot">' + foot + "</div></div>";
-  }
-
-  function renderCards() {
-    var brackets = visibleBrackets();
-    var metrics = activeMetrics();
-    var group = metricInfo(state.metric).group;
-    $("cards-title").textContent = bossName() + ": " + group.toLowerCase() + ", median per rank bracket";
-    // The cards follow the heatmap's metric: its group's metrics for the picked boss.
-    $("cards").innerHTML = [group].map(function (g) {
-      var ms = metrics.filter(function (m) { return m.group === g; });
-      if (!ms.length) return "";
-      return '<div class="card-group"><div class="cards">' +
-        ms.map(function (m) { return card(m, brackets); }).join("") + "</div></div>";
-    }).join("");
-  }
-
-  function renderPicker() {
-    var metrics = activeMetrics();
-    if (!metricInfo(state.metric) || snap.metrics.indexOf(state.metric) < 0) state.metric = "pulls_to_kill";
-    $("metric-picker").innerHTML = GROUPS.map(function (g) {
-      var ms = metrics.filter(function (m) { return m.group === g; });
-      if (!ms.length) return "";
-      return '<div class="pgroup"><span class="label">' + esc(g) + '</span><div class="chips">' + ms.map(function (m) {
-        return '<button type="button" class="chip small" data-metric="' + m.key + '" aria-pressed="' + (m.key === state.metric) + '">' +
-          esc(m.name) + "</button>";
-      }).join("") + "</div></div>";
-    }).join("");
+    $("metric").value = state.metric;
     var m = metricInfo(state.metric);
-    $("heat-title").textContent = "Median " + m.name.charAt(0).toLowerCase() + m.name.slice(1) + ", every boss";
-    $("heat-note").textContent = m.diff
-      ? "The small figure is the difference from 1-200 (the Hall of Fame guilds)."
-      : "The small figure is the multiple of 1-200's median (the Hall of Fame guilds).";
+    $("heat-title").textContent = "Median " + m.name.charAt(0).toLowerCase() + m.name.slice(1);
+    $("heat-def").textContent = m.hint + ".";
+    $("heat-note").textContent = m.diff ? "Small figure: difference from 1-200." : "Small figure: multiple of 1-200.";
   }
 
   function renderHeat() {
     var brackets = visibleBrackets();
     var m = metricInfo(state.metric);
-    var summary = snap.views[state.region].tier_summary;
     var head = "<thead><tr><th scope=\"col\">Bracket</th>" + snap.bosses.map(function (b) {
       var sel = b.slug === state.boss ? " sel" : "";
       return '<th scope="col" class="boss' + sel + '" data-boss="' + esc(b.slug) + '" title="' + esc(b.name) + '">' + esc(b.name) + "</th>";
-    }).join("") + (summary ? TIER_METRICS.map(function (t, i) {
-      return '<th scope="col" class="tiercol' + (i === 0 ? " first" : "") + '">' + esc(t.name) + "</th>";
-    }).join("") : "") + "</tr></thead>";
+    }).join("") + "</tr></thead>";
     var cols = snap.bosses.map(function (b) {
       var vals = brackets.map(function (br) { return med(cellAt(b.slug, br.label), m.key); });
       var present = vals.filter(function (v) { return v !== null; });
       return { vals: vals, max: Math.max.apply(null, present.concat([0])), min: Math.min.apply(null, present.concat([Infinity])) };
     });
     var body = "<tbody>" + brackets.map(function (br, r) {
-      var tiers = "";
-      if (summary) {
-        var t = summary[br.label];
-        tiers = TIER_METRICS.map(function (tm, i) {
-          var v = t ? t.median[tm.key] : null;
-          var mult = br.top || !t ? "" : multText(tm.key, t.vs_top[tm.key]);
-          var tn = t ? (typeof t.n === "object" ? t.n[tm.key] || 0 : t.n) : 0;
-          return '<td class="tiercol' + (i === 0 ? " first" : "") + '" title="Whole tier: n ' + tn + ' guilds">' +
-            (v === null ? "–" : esc(tm.fmt(v)) + (mult ? '<span class="mult">' + mult + "</span>" : "")) + "</td>";
-        }).join("");
-      }
       return "<tr" + (br.sub ? ' class="sub"' : "") + '><th scope="row">' + dot(br) + esc(br.label) + "</th>" +
         snap.bosses.map(function (b, ci) {
           var v = cols[ci].vals[r];
@@ -346,7 +279,7 @@
           var mult = br.top ? "" : multText(m.key, cell.vs_top[m.key]);
           return '<td class="h' + idx + sel + '" data-boss="' + esc(b.slug) + '" title="' + esc(b.name) + ": n " + n + '">' + esc(m.fmt(v)) +
             (mult ? '<span class="mult">' + mult + "</span>" : "") + "</td>";
-        }).join("") + tiers + "</tr>";
+        }).join("") + "</tr>";
     }).join("") + "</tbody>";
     $("heat").innerHTML = head + body;
   }
@@ -361,19 +294,16 @@
   function hline(x0, x1, y, strong) {
     return '<line x1="' + x0 + '" x2="' + x1 + '" y1="' + y + '" y2="' + y + '" style="stroke:' + (strong ? "var(--control)" : "var(--track)") + '"></line>';
   }
-  function chartLegend(options) {
-    return '<div class="legend" role="group" aria-label="Lines shown">' + options.map(function (br) {
-      return '<button type="button" class="lg" data-line="' + esc(br.label) + '" aria-pressed="' + !!state.chart[br.label] + '">' +
-        dot(br) + esc(br.label) + "</button>";
-    }).join("") + "</div>";
+  // A static key for the detail charts; the Brackets menu picks the lines.
+  function lineKey(brackets) {
+    return '<div class="legend">' + brackets.map(function (br) { return "<span>" + dot(br) + esc(br.label) + "</span>"; }).join("") + "</div>";
   }
 
   function renderCurve() {
-    var el = $("curve");
-    $("curve-title").textContent = bossName() + ": learning curve";
-    var options = visibleBrackets().filter(function (br) { return snap.views[state.region].bosses[state.boss][br.label].curve; });
-    var lines = options.filter(function (br) { return state.chart[br.label]; });
-    if (!options.length) { el.innerHTML = '<p class="none">No bracket has 10 guilds with this kill in public logs yet.</p>'; return; }
+    var el = $("detail");
+    $("detail-note").textContent = "Best pull so far, as the share of the fight left, by pull number. Bracket medians of guilds with the kill in public logs; latest data.";
+    var lines = visibleBrackets().filter(function (br) { return snap.views[state.region].bosses[state.boss][br.label].curve; });
+    if (!lines.length) { el.innerHTML = '<p class="none">No bracket has 10 guilds with this kill in public logs yet.</p>'; return; }
     var curves = lines.map(function (br) { return snap.views[state.region].bosses[state.boss][br.label].curve; });
     var maxN = Math.max.apply(null, curves.map(function (c) { return c[c.length - 1][0]; }).concat([10]));
     var W = 560, H = 300, x0 = 56, x1 = 540, y0 = 16, y1 = 260;
@@ -393,15 +323,15 @@
         ' style="stroke:' + br.color + '"><title>' + esc(br.label) + "</title></path>";
     });
     s += "</svg>";
-    el.innerHTML = s + chartLegend(options);
+    el.innerHTML = s + lineKey(lines);
   }
 
   var STAGE_COLORS = ["var(--h1)", "var(--h3)", "var(--h4)", "var(--h5)", "var(--h2)"];
   var BAND_NAMES = { "75-100": "75-100% left", "50-75": "50-75% left", "25-50": "25-50% left", "0-25": "under 25% left" };
 
   function renderWipes() {
-    var el = $("wipes");
-    $("wipes-title").textContent = bossName() + ": where wipes ended";
+    var el = $("detail");
+    $("detail-note").textContent = "Progression wipes by the stage they ended in, each guild counted once. The figure on the right is the share in the last segment. Latest data.";
     var brackets = visibleBrackets().filter(function (br) { return snap.views[state.region].bosses[state.boss][br.label].wipe_mix; });
     if (!brackets.length) { el.innerHTML = '<p class="none">No bracket has 10 guilds with wipes on this boss in public logs yet.</p>'; return; }
     var mixes = brackets.map(function (br) { return snap.views[state.region].bosses[state.boss][br.label].wipe_mix; });
@@ -426,8 +356,8 @@
   }
 
   function renderGear() {
-    var el = $("gear");
-    $("gear-title").textContent = bossName() + ": item level, first pull to kill";
+    var el = $("detail");
+    $("detail-note").textContent = "Bracket median of the raid's average item level on its first pull of the boss and on the kill.";
     var brackets = visibleBrackets().filter(function (br) {
       var c = cellAt(state.boss, br.label);
       return med(c, "first_pull_ilvl") !== null && med(c, "item_level") !== null;
@@ -466,8 +396,8 @@
   }
 
   function renderKillers() {
-    var el = $("killers");
-    $("killers-title").textContent = bossName() + ": what players die to";
+    var el = $("detail");
+    $("detail-note").textContent = "Deaths per progression pull to the abilities that kill the most players, pooled over each bracket's guilds. Latest data.";
     var list = (snap.killers || {})[state.boss] || [];
     var brackets = visibleBrackets().filter(function (br) { return (detailCell(br) || {}).killers; });
     if (!list.length || !brackets.length) {
@@ -484,8 +414,8 @@
   }
 
   function renderComp() {
-    var el = $("comp");
-    $("comp-title").textContent = bossName() + ": raid comp on the kill";
+    var el = $("detail");
+    $("detail-note").textContent = "Average players of each spec on the guild's first kill, from Warcraft Logs rankings. Latest data.";
     var brackets = visibleBrackets().filter(function (br) { return (detailCell(br) || {}).specs; });
     if (!brackets.length) { el.innerHTML = '<p class="none">Not enough first kills have rankings on this boss yet.</p>'; return; }
     // Specs in the order the first bracket shown uses them most.
@@ -499,34 +429,28 @@
     el.innerHTML = bracketTable(brackets, rows, "Average players of each spec on the first kill, per rank bracket");
   }
 
-  var ROSTER_ROWS = [
-    { key: "regulars", name: "Regular players", fmt: num },
-    { key: "core_coverage", name: "Pulls with the core 16 of 20", fmt: share },
-    { key: "new_per_week", name: "New regulars per week", fmt: function (v) { return v.toFixed(1); } }
-  ];
-
-  function renderRoster() {
-    var el = $("roster");
+  function renderSchedule() {
     var summary = snap.views[state.region].tier_summary;
-    if (!summary) { later("roster"); return; }
-    var brackets = visibleBrackets().filter(function (br) { var t = summary[br.label]; return t && t.median.regulars != null; });
-    if (!brackets.length) { el.innerHTML = '<p class="none">Not enough guilds have had the second read of their logs yet.</p>'; return; }
-    var rows = ROSTER_ROWS.map(function (r) {
-      return '<tr><th scope="row">' + esc(r.name) + "</th>" + brackets.map(function (br) {
-        var v = summary[br.label].median[r.key]; return "<td>" + (v === null || v === undefined ? "–" : esc(r.fmt(v))) + "</td>";
-      }).join("") + "</tr>";
+    if (!summary) { later("sched"); return; }
+    var brackets = visibleBrackets().filter(function (br) {
+      var t = summary[br.label];
+      return t && SCHEDULE.some(function (sm) { return t.median[sm.key] !== null && t.median[sm.key] !== undefined; });
     });
-    rows.push('<tr class="total"><th scope="row">Guilds</th>' + brackets.map(function (br) {
-      return "<td>" + (summary[br.label].n.regulars || 0) + "</td>";
-    }).join("") + "</tr>");
-    el.innerHTML = bracketTable(brackets, rows, "Roster stability medians per rank bracket, whole tier");
+    $("sched").innerHTML = SCHEDULE.map(function (sm) {
+      return "<div><h3>" + esc(sm.name) + "</h3>" + brackets.map(function (br) {
+        var t = summary[br.label], v = t.median[sm.key];
+        var w = v === null || v === undefined ? 0 : Math.min(100, 100 * v / sm.max);
+        return '<div class="sched-row' + (br.sub ? " sub" : "") + '" title="n ' + ((t.n && t.n[sm.key]) || 0) + ' guilds"><span class="row-label">' + esc(br.label) +
+          '</span><div class="bar"><div style="width:' + w.toFixed(1) + "%;background:" + br.color + '"></div></div><span class="val">' +
+          (v === null || v === undefined ? "–" : v.toFixed(1)) + "</span></div>";
+      }).join("") + "</div>";
+    }).join("");
   }
 
   function renderChart() {
     var bossName = snap.bosses.filter(function (b) { return b.slug === state.boss; })[0].name;
-    $("chart-title").textContent = bossName + " kills over the tier";
-    var options = visibleBrackets();
-    var brackets = options.filter(function (b) { return state.chart[b.label]; });
+    $("detail-note").textContent = "Share of guilds in each bracket with a kill, by week of the tier. Kill dates come from Raider.IO, so guilds without public logs count too.";
+    var brackets = visibleBrackets();
     var weeks = snap.weeks.length;
     var W = 560, H = 300, x0 = 56, x1 = 540, y0 = 20, y1 = 260;
     var px = function (i) { return weeks > 1 ? x0 + i * (x1 - x0) / (weeks - 1) : (x0 + x1) / 2; };
@@ -559,21 +483,27 @@
     s += '<line x1="' + px(state.week) + '" x2="' + px(state.week) + '" y1="' + y0 + '" y2="' + y1 + '" stroke-dasharray="3 4" style="stroke:var(--muted)"></line>';
     s += '<text x="' + px(state.week) + '" y="14" text-anchor="middle" font-size="11" style="fill:var(--muted)">As of</text>';
     s += "</svg>";
-    s += '<div class="legend" role="group" aria-label="Lines shown">' + options.map(function (br) {
+    s += '<div class="legend">' + brackets.map(function (br) {
       var v = snap.views[state.region].bosses[state.boss][br.label].kill_share_weekly[state.week];
-      return '<button type="button" class="lg" data-line="' + esc(br.label) + '" aria-pressed="' + !!state.chart[br.label] + '">' +
-        dot(br) + esc(br.label) + (v === null || v === undefined ? "" : " " + pct(v)) + "</button>";
+      return "<span>" + dot(br) + esc(br.label) + (v === null || v === undefined ? "" : " " + pct(v)) + "</span>";
     }).join("") + "</div>";
-    $("chart").innerHTML = s;
+    $("detail").innerHTML = s;
   }
 
   // The site is deployed on every push, ahead of the data, so a panel can
   // meet a snapshot from before its fields existed. One such panel shows a
   // note instead of stopping the rest of the page.
+  var DETAIL_RENDER = { kills: renderChart, curve: renderCurve, wipes: renderWipes, gear: renderGear, deaths: renderKillers, comp: renderComp };
+  function renderDetail() {
+    $("detail-title").textContent = bossName();
+    $("detail-note").textContent = "";
+    Array.prototype.forEach.call($("detail-tabs").querySelectorAll("[data-detail]"), function (b) {
+      b.setAttribute("aria-pressed", String(b.getAttribute("data-detail") === state.detail));
+    });
+    DETAIL_RENDER[state.detail]();
+  }
   var PANELS = [
-    [renderCards, "cards"], [renderPicker, "metric-picker"], [renderHeat, "heat"], [renderChart, "chart"],
-    [renderCurve, "curve"], [renderWipes, "wipes"], [renderGear, "gear"], [renderKillers, "killers"],
-    [renderComp, "comp"], [renderRoster, "roster"]
+    [renderMetricMenu, "heat"], [renderHeat, "heat"], [renderSchedule, "sched"], [renderDetail, "detail"]
   ];
   var LATER = "This fills in after the next daily data refresh.";
   function later(id) {
@@ -602,15 +532,15 @@
     var brackets = state.view === "brackets";
     $("content").hidden = !brackets;
     $("guild-view").hidden = brackets;
-    // Boss and bracket filters only apply to the bracket view; the guild views show every boss.
-    $("boss-field").hidden = !brackets;
+    // Metric and bracket filters only apply to the bracket view; the guild views have their own metric picker.
+    $("metric-field").hidden = !brackets;
     $("brackets-field").hidden = !brackets;
     if (!brackets) {
       window.GuildCompare.render(compareAPI);
       writeURL();
       return;
     }
-    renderChips();
+    renderBracketMenu();
     PANELS.forEach(function (p) { safely(p[0], p[1]); });
     writeURL();
   }
@@ -654,41 +584,34 @@
       state.view = tab.getAttribute("data-view");
       render();
     });
-    $("tier").addEventListener("change", function (e) { state.tier = e.target.value; state.week = null; state.chart = null; loadTier(); });
+    $("tier").addEventListener("change", function (e) { state.tier = e.target.value; state.week = null; loadTier(); });
     $("region").addEventListener("change", function (e) { state.region = e.target.value; render(); });
-    $("boss").addEventListener("change", function (e) { state.boss = e.target.value; render(); });
     $("week").addEventListener("change", function (e) { state.week = +e.target.value; render(); });
-    $("brackets").addEventListener("click", function (e) {
-      var btn = e.target.closest("button[data-bracket]");
-      if (!btn) return;
-      var label = btn.getAttribute("data-bracket");
-      var shown = visibleBrackets().length;
-      if (!state.hidden[label] && shown === 1) return; // keep at least one bracket
-      state.hidden[label] = !state.hidden[label];
+    $("brackets").addEventListener("change", function (e) {
+      var box = e.target.closest("input[data-bracket]");
+      if (!box) return;
+      var label = box.getAttribute("data-bracket");
+      if (!box.checked && visibleBrackets().length === 1) { box.checked = true; return; } // keep at least one bracket
+      state.hidden[label] = !box.checked;
       render();
     });
-    // The kill chart and the learning curve share one line selection.
-    ["chart", "curve"].forEach(function (id) {
-      $(id).addEventListener("click", function (e) {
-        var btn = e.target.closest("button[data-line]");
-        if (!btn) return;
-        var label = btn.getAttribute("data-line");
-        state.chart[label] = !state.chart[label];
-        renderChart();
-        renderCurve();
-      });
+    // The Brackets menu closes on a click anywhere else.
+    document.addEventListener("click", function (e) {
+      var menu = $("brackets-field");
+      if (menu.open && !menu.contains(e.target)) menu.open = false;
     });
-    $("metric-picker").addEventListener("click", function (e) {
-      var btn = e.target.closest("button[data-metric]");
+    $("metric").addEventListener("change", function (e) { state.metric = e.target.value; render(); });
+    $("detail-tabs").addEventListener("click", function (e) {
+      var btn = e.target.closest("button[data-detail]");
       if (!btn) return;
-      state.metric = btn.getAttribute("data-metric");
-      render();
+      state.detail = btn.getAttribute("data-detail");
+      safely(renderDetail, "detail");
+      writeURL();
     });
     $("heat").addEventListener("click", function (e) {
       var cell = e.target.closest("[data-boss]");
       if (!cell) return;
       state.boss = cell.getAttribute("data-boss");
-      $("boss").value = state.boss;
       render();
     });
   }
