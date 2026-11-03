@@ -270,14 +270,14 @@
           var sel = b.slug === state.boss ? " sel" : "";
           var n = cell.n[m.key] || 0;
           if (v === null) {
-            return '<td class="empty' + sel + '" data-boss="' + esc(b.slug) + '" title="' + esc(b.name) + ": " + n + ' measured kills">–</td>';
+            return '<td class="empty' + sel + '" data-boss="' + esc(b.slug) + '" title="' + esc(b.name) + ": " + esc(n) + ' measured kills">–</td>';
           }
           var c = cols[ci], t;
           if (m.diff) t = c.max > c.min ? (v - c.min) / (c.max - c.min) : 0;
           else t = c.max ? v / c.max : 0;
           var idx = Math.min(5, Math.max(0, Math.floor(t * 5.999)));
           var mult = br.top ? "" : multText(m.key, cell.vs_top[m.key]);
-          return '<td class="h' + idx + sel + '" data-boss="' + esc(b.slug) + '" title="' + esc(b.name) + ": n " + n + '">' + esc(m.fmt(v)) +
+          return '<td class="h' + idx + sel + '" data-boss="' + esc(b.slug) + '" title="' + esc(b.name) + ": n " + esc(n) + '">' + esc(m.fmt(v)) +
             (mult ? '<span class="mult">' + mult + "</span>" : "") + "</td>";
         }).join("") + "</tr>";
     }).join("") + "</tbody>";
@@ -347,7 +347,7 @@
           '" title="' + esc(label(k)) + ": " + pct(v) + '"></div>' : "";
       }).join("");
       return '<div class="row' + (br.sub ? " sub" : "") + '"><span class="row-label">' + esc(br.label) + '</span><div class="stack">' + segs +
-        '</div><span class="val">' + pct(sh[keys[keys.length - 1]] || 0) + '<span class="n">n ' + mixes[i].n + "</span></span></div>";
+        '</div><span class="val">' + pct(sh[keys[keys.length - 1]] || 0) + '<span class="n">n ' + esc(mixes[i].n) + "</span></span></div>";
     }).join("");
     var legend = '<div class="legend">' + keys.map(function (k, j) {
       return '<span><span class="dot sq" style="background:' + STAGE_COLORS[j % STAGE_COLORS.length] + '"></span>' + esc(label(k)) + "</span>";
@@ -404,11 +404,11 @@
       el.innerHTML = '<p class="none">Not enough guilds have had the second read of their logs on this boss yet.</p>'; return;
     }
     var rows = list.map(function (a) {
-      return '<tr><th scope="row">' + (a.name ? esc(a.name) : "Ability " + a.id) + (a.avoidable ? ' <span class="tag">avoidable</span>' : "") + "</th>" +
+      return '<tr><th scope="row">' + (a.name ? esc(a.name) : "Ability " + esc(a.id)) + (a.avoidable ? ' <span class="tag">avoidable</span>' : "") + "</th>" +
         brackets.map(function (br) { var v = detailCell(br).killers.per_pull[String(a.id)]; return "<td>" + (v === undefined ? "–" : rate(v)) + "</td>"; }).join("") + "</tr>";
     });
     rows.push('<tr class="total"><th scope="row">All deaths</th>' + brackets.map(function (br) {
-      var k = detailCell(br).killers; return "<td>" + rate(k.all_per_pull) + '<span class="n">n ' + k.n + "</span></td>";
+      var k = detailCell(br).killers; return "<td>" + rate(k.all_per_pull) + '<span class="n">n ' + esc(k.n) + "</span></td>";
     }).join("") + "</tr>");
     el.innerHTML = bracketTable(brackets, rows, "Deaths per pull by killing ability and rank bracket");
   }
@@ -425,7 +425,7 @@
         var v = detailCell(br).specs.mean[k]; return "<td>" + (v ? v.toFixed(1) : "–") + "</td>";
       }).join("") + "</tr>";
     });
-    rows.push('<tr class="total"><th scope="row">Kills</th>' + brackets.map(function (br) { return "<td>" + detailCell(br).specs.n + "</td>"; }).join("") + "</tr>");
+    rows.push('<tr class="total"><th scope="row">Kills</th>' + brackets.map(function (br) { return "<td>" + esc(detailCell(br).specs.n) + "</td>"; }).join("") + "</tr>");
     el.innerHTML = bracketTable(brackets, rows, "Average players of each spec on the first kill, per rank bracket");
   }
 
@@ -440,7 +440,7 @@
       return "<div><h3>" + esc(sm.name) + "</h3>" + brackets.map(function (br) {
         var t = summary[br.label], v = t.median[sm.key];
         var w = v === null || v === undefined ? 0 : Math.min(100, 100 * v / sm.max);
-        return '<div class="sched-row' + (br.sub ? " sub" : "") + '" title="n ' + ((t.n && t.n[sm.key]) || 0) + ' guilds"><span class="row-label">' + esc(br.label) +
+        return '<div class="sched-row' + (br.sub ? " sub" : "") + '" title="n ' + esc((t.n && t.n[sm.key]) || 0) + ' guilds"><span class="row-label">' + esc(br.label) +
           '</span><div class="bar"><div style="width:' + w.toFixed(1) + "%;background:" + br.color + '"></div></div><span class="val">' +
           (v === null || v === undefined ? "–" : v.toFixed(1)) + "</span></div>";
       }).join("") + "</div>";
@@ -578,6 +578,7 @@
   };
 
   function bind() {
+    $("filters").addEventListener("submit", function (e) { e.preventDefault(); });
     $("tabs").addEventListener("click", function (e) {
       var tab = e.target.closest("[data-view]");
       if (!tab) return;

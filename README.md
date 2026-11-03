@@ -211,6 +211,22 @@ from Raider.IO's `raiding/static-data`. For a past tier, add its key to
 Incarnates and older (every boss shows 1 pull); set `rio_pulls=False` on such
 a tier so pulls to kill come from the logs only.
 
+## Security
+
+- The site runs only its own scripts. The WoWHub brand kit (nav bar, styles,
+  app list) is copied into `site/wowhub/` from a pinned commit of
+  anom0ly/wowhubnet instead of loading from wowhub.net. When the brand kit
+  changes, run `scripts/vendor-wowhub.sh <path to a wowhubnet clone>` and
+  commit the result. `site/wowhub/SOURCE` records the commit.
+- A Content-Security-Policy meta tag in `site/index.html` blocks scripts from
+  anywhere else. A new external script, font or API needs adding there.
+- Workflows pin each action to a commit SHA, and install Python packages from
+  `requirements.lock` with hashes. Dependabot opens weekly PRs for both. After
+  changing dependencies in `pyproject.toml`, regenerate the lock with
+  `pip-compile --generate-hashes --strip-extras --no-emit-index-url --output-file=requirements.lock pyproject.toml`.
+- Workflow permissions are set per job; only the deploy job can publish to
+  Pages.
+
 ## Known limits
 
 - Region views only fill as far as Raider.IO's region lists go; brackets with

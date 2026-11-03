@@ -127,7 +127,7 @@
     var found = matches(data, input.value);
     if (!input.value.trim()) { list.hidden = true; input.setAttribute("aria-expanded", "false"); return; }
     list.innerHTML = found.length ? found.map(function (g, i) {
-      return '<li role="option" id="' + input.id + "-o" + i + '" data-id="' + g.id + '"' + (i === 0 ? ' aria-selected="true"' : "") + ">" +
+      return '<li role="option" id="' + input.id + "-o" + i + '" data-id="' + esc(g.id) + '"' + (i === 0 ? ' aria-selected="true"' : "") + ">" +
         "<span>" + esc(g.name) + '</span><span class="gs-meta">' + esc(guildLine(g)) +
         (g.status === "matched" ? "" : " · pulls only") + "</span></li>";
     }).join("") : '<li class="gs-empty">No guild by that name in this tier</li>';
@@ -246,8 +246,8 @@
     var fmt = function (v, f) { return v === null ? "–" : f(v); };
     var one = function (v) { return v.toFixed(1); };
     var summary = '<div class="summary">' +
-      stat("World rank", vs(A.world.toLocaleString(), B.world.toLocaleString())) +
-      stat("Region rank", vs(A.region.toUpperCase() + " " + fmt(A.regionRank, String), B.region.toUpperCase() + " " + fmt(B.regionRank, String))) +
+      stat("World rank", vs(esc(A.world.toLocaleString()), esc(B.world.toLocaleString()))) +
+      stat("Region rank", vs(A.region.toUpperCase() + " " + fmt(A.regionRank, esc), B.region.toUpperCase() + " " + fmt(B.regionRank, esc))) +
       stat("Bosses killed", vs(killCount(A) + "/" + A.bosses.length, killCount(B) + "/" + B.bosses.length)) +
       stat("Pulls, all kills", vs(fmt(sumOf(A, "pulls_to_kill"), function (v) { return v.toLocaleString(); }),
                                   fmt(sumOf(B, "pulls_to_kill"), function (v) { return v.toLocaleString(); }))) +

@@ -1,0 +1,113 @@
+/*
+ * WoWHub brand kit: brand.css (v1)
+ * Design tokens plus a few base components. Every token is a CSS variable
+ * prefixed --wh- so it can't collide with an app's own variables.
+ *
+ * Fonts: add this to the page <head> (brand.css doesn't @import them, for speed):
+ * <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cinzel:wght@600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap">
+ */
+
+:root {
+  /* Color: Crimson */
+  --wh-bg: #120D0D;
+  --wh-surface: #1C1515;
+  --wh-raised: #251B1B;
+  --wh-border: #3A2B2B;
+  --wh-text: #F0E6E2;
+  --wh-muted: #B39F9B;
+  --wh-accent: #E5675C;
+  --wh-accent-hover: #EE8279;
+  --wh-on-accent: #1C0806;
+
+  /* Status */
+  --wh-live: #7FE0A8;
+  --wh-live-bg: rgba(95, 207, 154, 0.14);
+  --wh-beta: #9CCBFF;
+  --wh-beta-bg: rgba(140, 195, 255, 0.14);
+  --wh-wip: #BDB7B4;
+  --wh-wip-bg: rgba(170, 166, 164, 0.16);
+
+  /* Type */
+  --wh-font-display: Cinzel, Georgia, serif;
+  --wh-font-body: Inter, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --wh-font-mono: "JetBrains Mono", ui-monospace, Menlo, Consolas, monospace;
+
+  /* Spacing (4px scale) */
+  --wh-space-1: 4px;
+  --wh-space-2: 8px;
+  --wh-space-3: 12px;
+  --wh-space-4: 16px;
+  --wh-space-5: 24px;
+  --wh-space-6: 32px;
+  --wh-space-7: 48px;
+  --wh-space-8: 72px;
+
+  /* Shape */
+  --wh-radius-sm: 8px;
+  --wh-radius: 12px;
+  --wh-radius-lg: 14px;
+  --wh-nav-height: 48px;
+  --wh-max-width: 1200px;
+}
+
+/* ---- Base components (opt in by class) ---- */
+
+.wh-btn {
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--wh-space-2);
+  min-height: 44px;
+  padding: 0 18px;
+  border-radius: var(--wh-radius-sm);
+  border: 1px solid transparent;
+  font: 600 14px/1 var(--wh-font-body);
+  text-decoration: none;
+  cursor: pointer;
+  transition: background-color 0.15s, border-color 0.15s;
+}
+.wh-btn--primary { background: var(--wh-accent); color: var(--wh-on-accent); }
+.wh-btn--primary:hover { background: var(--wh-accent-hover); }
+.wh-btn--secondary { background: transparent; color: var(--wh-text); border-color: var(--wh-border); font-weight: 500; }
+.wh-btn--secondary:hover { border-color: var(--wh-muted); }
+.wh-btn[disabled], .wh-btn--disabled {
+  background: transparent; color: var(--wh-muted); border: 1px dashed var(--wh-border);
+  font-weight: 500; cursor: default;
+}
+.wh-btn:focus-visible { outline: 2px solid var(--wh-accent); outline-offset: 2px; }
+
+.wh-card {
+  background: var(--wh-surface);
+  border: 1px solid var(--wh-border);
+  border-radius: var(--wh-radius-lg);
+  overflow: hidden;
+}
+
+.wh-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  font: 600 12px/1.2 var(--wh-font-body);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+.wh-badge::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  box-sizing: border-box;
+}
+.wh-badge--live { background: var(--wh-live-bg); color: var(--wh-live); }
+.wh-badge--live::before { background: currentColor; }
+.wh-badge--beta { background: var(--wh-beta-bg); color: var(--wh-beta); }
+.wh-badge--beta::before { background: currentColor; opacity: 0.6; }
+.wh-badge--wip { background: var(--wh-wip-bg); color: var(--wh-wip); }
+.wh-badge--wip::before { border: 1.5px solid currentColor; }
+
+.wh-mono { font-family: var(--wh-font-mono); }
+.wh-display { font-family: var(--wh-font-display); letter-spacing: 0.03em; }
