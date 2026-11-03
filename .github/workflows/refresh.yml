@@ -39,11 +39,9 @@ on:
         required: false
         default: "1"
 
+# Nothing by default; each job asks for what it needs.
 permissions:
-  contents: write   # data branch and the pipeline-state release
-  actions: write    # start the next chunk
-  pages: write
-  id-token: write
+  contents: read
 
 concurrency:
   group: refresh
@@ -60,18 +58,23 @@ jobs:
   refresh:
     runs-on: ubuntu-latest
     timeout-minutes: 350
+    permissions:
+      contents: write   # data branch and the pipeline-state release
+      actions: write    # start the next chunk
     outputs:
       complete: ${{ steps.result.outputs.complete }}
     env:
       GH_TOKEN: ${{ github.token }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: "3.12"
 
-      - run: pip install .
+      # Exact versions with hashes, so a bad release on PyPI can't run here.
+      # The package itself runs from the checkout (python -m guildpulls).
+      - run: pip install --require-hashes -r requirements.lock
 
       - name: Check out the data branch
         run: |
@@ -105,6 +108,16 @@ jobs:
           TIER: ${{ inputs.tier }}
           LIMIT: ${{ inputs.limit }}
         run: |
+          # Manual inputs are plain values; refuse anything else.
+          if [ -n "$RUN_ID" ] && ! [[ "$RUN_ID" =~ ^[A-Za-z0-9._-]{1,64}$ ]]; then
+            echo "::error::run_id may only use letters, digits, '.', '_' and '-'."; exit 1
+          fi
+          if [ -n "$LIMIT" ] && ! [[ "$LIMIT" =~ ^[0-9]{1,6}$ ]]; then
+            echo "::error::limit must be a whole number."; exit 1
+          fi
+          if [ -n "$TIER" ] && ! [[ "$TIER" =~ ^[a-z0-9-]{1,64}$ ]]; then
+            echo "::error::tier must be a tier key like liberation-of-undermine."; exit 1
+          fi
           if [ -z "$WCL_CLIENT_ID" ] || [ -z "$WCL_CLIENT_SECRET" ]; then
             echo "::error::Add WCL_CLIENT_ID and WCL_CLIENT_SECRET under Settings > Secrets and variables > Actions."
             exit 1
@@ -138,13 +151,16 @@ jobs:
 
       - name: Commit snapshots
         if: always() && steps.run.outputs.run_id != ''
+        env:
+          RUN_ID: ${{ steps.run.outputs.run_id }}
+          CHUNK: ${{ inputs.chunk || '1' }}
         run: |
           cd published
           git add -A
           if git diff --cached --quiet; then
             echo "No snapshot changes."
           else
-            git commit -q -m "Data refresh ${{ steps.run.outputs.run_id }} (chunk ${{ inputs.chunk || '1' }})"
+            git commit -q -m "Data refresh $RUN_ID (chunk $CHUNK)"
             git push origin data
           fi
 
@@ -182,9 +198,13 @@ jobs:
           RUN_ID: ${{ steps.run.outputs.run_id }}
           TIER: ${{ inputs.tier }}
           LIMIT: ${{ inputs.limit }}
+          COMPLETE: ${{ steps.result.outputs.complete }}
         run: |
+          if ! [[ "$CHUNK" =~ ^[0-9]{1,2}$ ]]; then
+            echo "::error::chunk must be a small whole number."; exit 1
+          fi
           if [ "$CHUNK" -ge "$MAX_CHUNKS" ]; then
-            if [ "${{ steps.result.outputs.complete }}" = true ]; then
+            if [ "$COMPLETE" = true ]; then
               echo "Chunk limit reached; the second read and past tiers continue after the next scheduled run."
               exit 0
             fi
@@ -198,4 +218,8 @@ jobs:
   deploy:
     needs: refresh
     if: always() && needs.refresh.result != 'cancelled'
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
     uses: ./.github/workflows/deploy.yml

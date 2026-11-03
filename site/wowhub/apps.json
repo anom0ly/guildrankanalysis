@@ -1,0 +1,51 @@
+{
+  "version": 1,
+  "hub": {
+    "name": "WoWHub",
+    "url": "https://wowhub.net",
+    "tagline": "Tools, trackers and games for World of Warcraft players.",
+    "github": "https://github.com/anom0ly"
+  },
+  "apps": [
+    {
+      "id": "journey",
+      "name": "Journey Forever",
+      "url": "https://journey.wowhub.net",
+      "pitch": "Track your WoW Forever leveling journey from your Road to Sixty addon data.",
+      "short": "Leveling tracker",
+      "status": "live",
+      "screenshot": "/assets/screenshots/journey.jpg?v=1f5e7886",
+      "icon": "<path d=\"M5 19c4 0 3-6 7-6s3-6 7-6\"/><circle cx=\"5\" cy=\"19\" r=\"2\"/><path d=\"M19 7V3l3 1.5L19 6\"/>"
+    },
+    {
+      "id": "raids",
+      "name": "Raiding Analytics",
+      "url": "https://raids.wowhub.net",
+      "pitch": "Raid tier analytics, split into guild rank brackets. Data refreshed daily.",
+      "short": "Raid tier analytics",
+      "status": "live",
+      "screenshot": "/assets/screenshots/raids.jpg?v=2a84b08a",
+      "icon": "<path d=\"M3 21h18\"/><path d=\"M6 17v-5\"/><path d=\"M11 17V5\"/><path d=\"M16 17V9\"/><path d=\"M20 17v-3\"/>"
+    },
+    {
+      "id": "grindheim",
+      "name": "Grindheim",
+      "url": "https://grindheim.wowhub.net",
+      "pitch": "An idle game: build a raid team and push for world first.",
+      "short": "Idle raid-team game",
+      "status": "wip",
+      "screenshot": null,
+      "icon": "<path d=\"M4 4l10 10\"/><path d=\"M20 4L10 14\"/><path d=\"M11.5 16.5l5-5\"/><path d=\"M7.5 11.5l5 5\"/><path d=\"M15.5 15.5l4 4\"/><path d=\"M8.5 15.5l-4 4\"/>"
+    },
+    {
+      "id": "rwf",
+      "name": "RWF Betting",
+      "url": "https://rwf.wowhub.net",
+      "pitch": "Bet play-money points on the Race to World First. No real money, just bragging rights.",
+      "short": "Bet on Race to World First",
+      "status": "beta",
+      "screenshot": "/assets/screenshots/rwf.jpg?v=f289d362",
+      "icon": "<path d=\"M8 4h8v5a4 4 0 0 1-8 0V4z\"/><path d=\"M8 6H5a3 3 0 0 0 3 4\"/><path d=\"M16 6h3a3 3 0 0 1-3 4\"/><path d=\"M12 13v4\"/><path d=\"M8.5 20h7\"/>"
+    }
+  ]
+}

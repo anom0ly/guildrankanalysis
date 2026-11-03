@@ -3,16 +3,20 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<!-- Only this site's own scripts run here; styles may also come from Google Fonts.
+     Inline style attributes are used for chart colours. GitHub Pages can't send
+     headers, so the policy lives in this tag. -->
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self'; base-uri 'self'; form-action 'none'; object-src 'none'">
 <title>Guild Pull Analytics</title>
 <meta name="description" content="Mythic raid progression by guild rank: pulls, raid nights, time on boss, learning curve, wipe depth, raid schedule and item level, deaths, roster and raid comp.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <meta name="theme-color" content="#120D0D">
-<link rel="icon" href="https://wowhub.net/assets/favicon.svg" type="image/svg+xml">
+<link rel="icon" href="wowhub/favicon.svg" type="image/svg+xml">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cinzel:wght@600;700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap">
-<link rel="stylesheet" href="https://wowhub.net/brand.css">
+<link rel="stylesheet" href="wowhub/brand.css">
 <link rel="stylesheet" href="style.css">
-<script src="https://wowhub.net/nav.js" data-app="raids" data-app-name="Raiding Analytics" defer></script>
+<script src="wowhub/nav.js" data-app="raids" data-app-name="Raiding Analytics" defer></script>
 </head>
 <body>
 <div class="page">
@@ -33,7 +37,7 @@
   <button type="button" class="tab" role="tab" id="tab-peers" data-view="peers" aria-selected="false">Against peers</button>
 </nav>
 
-<form class="filters" id="filters" onsubmit="return false">
+<form class="filters" id="filters">
   <div class="ctl"><label for="region">Region</label>
     <select id="region">
       <option value="all">All</option>
