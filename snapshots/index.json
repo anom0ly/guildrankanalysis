@@ -1,6 +1,6 @@
 {
  "schema": 1,
- "generated_at": "2026-11-11T18:35:25.850779+00:00",
+ "generated_at": "2026-11-12T19:07:20.211982+00:00",
  "tiers": [
   {
    "key": "venomous-abyss",
@@ -12,11 +12,11 @@
    "snapshot": "venomous-abyss/latest.json",
    "guilds": "venomous-abyss/guilds.json",
    "compare": "venomous-abyss/compare.json",
-   "updated_at": "2026-11-11T18:34:23.570718+00:00",
+   "updated_at": "2026-11-12T19:06:41.686992+00:00",
    "backfill": null,
    "enrich": {
-    "done": 63396,
-    "total": 63410
+    "done": 64631,
+    "total": 64645
    }
   },
   {
@@ -94,11 +94,11 @@
  ],
  "run": {
   "tier": "venomous-abyss",
-  "run_id": "2026-11-11",
-  "started_at": "2026-11-11T17:39:26.621727+00:00",
-  "completed_at": "2026-11-11T17:59:50.761850+00:00",
+  "run_id": "2026-11-12",
+  "started_at": "2026-11-12T17:51:44.499209+00:00",
+  "completed_at": "2026-11-12T18:15:11.647780+00:00",
   "complete": true,
-  "done": 5873,
-  "total": 5874
+  "done": 5883,
+  "total": 5884
  }
 }
