@@ -1,6 +1,6 @@
 {
  "schema": 1,
- "generated_at": "2026-11-26T20:06:20.755831+00:00",
+ "generated_at": "2026-11-26T20:11:11.019431+00:00",
  "tiers": [
   {
    "key": "venomous-abyss",
@@ -12,7 +12,7 @@
    "snapshot": "venomous-abyss/latest.json",
    "guilds": "venomous-abyss/guilds.json",
    "compare": "venomous-abyss/compare.json",
-   "updated_at": "2026-11-26T20:05:08.158896+00:00",
+   "updated_at": "2026-11-26T20:10:00.390263+00:00",
    "backfill": null,
    "enrich": {
     "done": 72670,
